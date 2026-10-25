@@ -37,4 +37,13 @@ struct AppModelTests {
         model.selection = "Arimo"
         #expect(model.selectedFont?.name == "Arimo")
     }
+
+    @Test func searchHidesAndRestoresSelection() async {
+        let model = await loadedModel()
+        model.selection = "Arimo"
+        model.searchText = "jetbrains"
+        #expect(model.selectedFont == nil)
+        model.searchText = ""
+        #expect(model.selectedFont?.name == "Arimo")
+    }
 }

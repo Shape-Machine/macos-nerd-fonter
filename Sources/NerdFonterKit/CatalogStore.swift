@@ -44,7 +44,8 @@ public struct CatalogStore: Sendable {
     /// Returns the cached catalog if fresh; otherwise fetches. Falls back to a stale cache when offline.
     public func load() async throws -> Catalog {
         let cached = try? JSONDecoder().decode(Catalog.self, from: Data(contentsOf: cacheFile))
-        if let cached, now().timeIntervalSince(cached.fetchedAt) < Self.maxAge {
+        // A negative age means the clock went backwards; treat it as stale.
+        if let cached, (0..<Self.maxAge).contains(now().timeIntervalSince(cached.fetchedAt)) {
             return cached
         }
         do {

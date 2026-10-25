@@ -30,9 +30,10 @@ public final class AppModel {
         }
     }
 
+    /// Only resolves while the selection is visible, so search never leaves a hidden font on screen.
+    /// The selection itself is kept, so clearing the search brings it back.
     public var selectedFont: FontFamily? {
-        guard case .loaded(let catalog) = catalogState else { return nil }
-        return catalog.fonts.first { $0.id == selection }
+        fonts.first { $0.id == selection }
     }
 
     public func loadCatalog() async {

@@ -45,6 +45,16 @@ struct CatalogStoreTests {
         #expect(catalog.fetchedAt == later)
     }
 
+    @Test func refetchesWhenClockMovedBackwards() async throws {
+        let file = Fixtures.tempFile()
+        let start = Date.now
+        _ = try await Fixtures.store(Fixtures.Server(), cacheFile: file, now: start).load()
+
+        let server = Fixtures.Server()
+        _ = try await Fixtures.store(server, cacheFile: file, now: start - 3600).load()
+        #expect(server.requests == 2)
+    }
+
     @Test func fallsBackToStaleCacheWhenOffline() async throws {
         let file = Fixtures.tempFile()
         let start = Date.now
