@@ -1,15 +1,24 @@
 #!/bin/sh
 # Builds a release binary and wraps it into build/NerdFonter.app (ad-hoc signed).
+#   VERSION=1.2.3   version shown in Finder and About (default 0.1.0)
+#   UNIVERSAL=1     build for Apple silicon and Intel (slower; used for releases)
 set -eu
 
 cd "$(dirname "$0")/.."
 
 NAME=NerdFonter
-VERSION=0.1.0
+VERSION="${VERSION:-0.1.0}"
 APP="build/$NAME.app"
 
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)/$NAME"
+if [ "${UNIVERSAL:-}" = 1 ]; then
+    FLAGS="-c release --arch arm64 --arch x86_64"
+else
+    FLAGS="-c release"
+fi
+# shellcheck disable=SC2086
+swift build $FLAGS
+# shellcheck disable=SC2086
+BIN="$(swift build $FLAGS --show-bin-path)/$NAME"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
