@@ -26,6 +26,18 @@
 - **Build:** Swift Package (no `.xcodeproj`). `swift build` plus a small script that wraps the binary into a `.app`.
 - **Distribution:** Personal use only for now — no signing, notarization, or release pipeline.
 
+## Commands
+
+- `make run` — build `build/NerdFonter.app` and open it
+- `make test` — run tests
+- `make clean` — remove build output
+
+## Layout
+
+- `Sources/NerdFonter` — app entry point and SwiftUI views (keep thin)
+- `Sources/NerdFonterKit` — models and core logic
+- `Tests/NerdFonterKitTests` — Swift Testing tests for `NerdFonterKit`
+
 ## Features (v1)
 
 - **Browse** the Nerd Fonts catalog.
