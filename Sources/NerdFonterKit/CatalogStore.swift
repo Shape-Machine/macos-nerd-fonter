@@ -21,25 +21,11 @@ public struct CatalogStore: Sendable {
         self.now = now
     }
 
-    /// We cache what we need ourselves, so skip URLSession's on-disk HTTP cache.
-    private static let session: URLSession = {
-        let config = URLSessionConfiguration.ephemeral
-        config.urlCache = nil
-        return URLSession(configuration: config)
-    }()
-
     /// Uses `~/Library/Caches/<bundle id>/catalog.json`.
-    public static let live = CatalogStore(
-        cacheFile: URL.cachesDirectory
-            .appending(path: Bundle.main.bundleIdentifier ?? "NerdFonter")
-            .appending(path: "catalog.json"),
-        fetch: { url in
-            let (data, response) = try await session.data(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
-            return data
-        })
+    public static let live = CatalogStore(cacheFile: cacheDirectory.appending(path: "catalog.json"), fetch: HTTP.data)
+
+    /// `~/Library/Caches/<bundle id>`.
+    static let cacheDirectory = URL.cachesDirectory.appending(path: Bundle.main.bundleIdentifier ?? "NerdFonter")
 
     /// Returns the cached catalog if fresh; otherwise fetches. Falls back to a stale cache when offline.
     public func load() async throws -> Catalog {

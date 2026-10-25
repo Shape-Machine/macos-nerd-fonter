@@ -10,7 +10,8 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
             if let font = model.selectedFont {
-                FontDetailView(font: font)
+                FontDetailView(font: font, model: model)
+                    .task(id: font.id) { await model.loadPreview() }
             } else {
                 ContentUnavailableView("No Font Selected", systemImage: "textformat")
             }
@@ -40,22 +41,5 @@ struct ContentView: View {
                 if model.fonts.isEmpty { ContentUnavailableView.search(text: model.searchText) }
             }
         }
-    }
-}
-
-private struct FontDetailView: View {
-    let font: FontFamily
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(font.name).font(.largeTitle.weight(.semibold))
-            Text(font.description).foregroundStyle(.secondary)
-            Text("\(font.licenseId) · v\(font.version)")
-                .font(.callout).foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .navigationTitle(font.name)
     }
 }

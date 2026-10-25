@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import NerdFonterKit
 
@@ -36,6 +37,38 @@ struct AppModelTests {
         #expect(model.selectedFont == nil)
         model.selection = "Arimo"
         #expect(model.selectedFont?.name == "Arimo")
+    }
+
+    @Test func previewDefaultsToMainTypefaceAndKeepsVariant() async throws {
+        let archive = try FontStoreTests.makeArchive([
+            "JetBrainsMonoNerdFont-Regular.ttf", "JetBrainsMonoNerdFontMono-Regular.ttf",
+            "JetBrainsMonoNLNerdFont-Regular.ttf",
+        ])
+        let model = AppModel(
+            store: Fixtures.store(Fixtures.Server(), cacheFile: Fixtures.tempFile()),
+            fontStore: FontStoreTests.store(serving: archive, counter: .init()))
+        await model.loadCatalog()
+        model.selection = "JetBrainsMono"
+        await model.loadPreview()
+
+        #expect(model.baseNames == ["JetBrainsMono", "JetBrainsMonoNL"])
+        #expect(model.variants == [.standard, .mono])
+        #expect(model.previewFace?.url.lastPathComponent == "JetBrainsMonoNerdFontMono-Regular.ttf")
+
+        // NL has no Mono: fall back to what exists without changing the remembered variant.
+        model.baseName = "JetBrainsMonoNL"
+        #expect(model.previewFace?.url.lastPathComponent == "JetBrainsMonoNLNerdFont-Regular.ttf")
+        #expect(model.variant == .mono)
+    }
+
+    @Test func previewFailsWhenDownloadFails() async {
+        let model = AppModel(
+            store: Fixtures.store(Fixtures.Server(), cacheFile: Fixtures.tempFile()),
+            fontStore: FontStore(root: Fixtures.tempFile()) { _, _ in throw URLError(.notConnectedToInternet) })
+        await model.loadCatalog()
+        model.selection = "Arimo"
+        await model.loadPreview()
+        #expect(model.preview == .failed)
     }
 
     @Test func searchHidesAndRestoresSelection() async {
