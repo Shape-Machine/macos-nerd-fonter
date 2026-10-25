@@ -58,6 +58,8 @@ public final class AppModel {
     private var previewToken = UUID()
     /// Same, for scans of the Fonts folders.
     private var scanToken = UUID()
+    /// The cache is trimmed once per launch, before anything else touches it.
+    private var didTrimCache = false
 
     public init(
         store: CatalogStore = .live, fontStore: FontStore = .live, library: FontLibrary = .live,
@@ -88,6 +90,22 @@ public final class AppModel {
         }
     }
 
+    // MARK: Cache
+
+    /// Not while downloads or installs might be reading the cache.
+    public var canClearCache: Bool {
+        guard operations.isEmpty else { return false }
+        if case .loading = preview, selectedFont != nil { return false }
+        return true
+    }
+
+    public func clearCache() async {
+        guard canClearCache else { return }
+        await fontStore.clear()
+        // The preview may have been reading cached files.
+        if selectedFont != nil { await loadPreview() }
+    }
+
     // MARK: Favorites
 
     public func toggleFavorite(_ id: FontFamily.ID) {
@@ -104,7 +122,13 @@ public final class AppModel {
     public func loadCatalog() async {
         catalogState = .loading
         do {
-            catalogState = .loaded(try await store.load())
+            let catalog = try await store.load()
+            // Trim before the list appears, so no preview or install can be using the cache.
+            if !didTrimCache {
+                didTrimCache = true
+                await fontStore.trim(keeping: catalog.release)
+            }
+            catalogState = .loaded(catalog)
             await refreshInstalled()
         } catch {
             catalogState = .failed
