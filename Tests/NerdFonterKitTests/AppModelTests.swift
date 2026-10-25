@@ -36,9 +36,10 @@ struct AppModelTests {
 
     @Test func selectionResolvesToFont() async {
         let model = await loadedModel()
+        model.selection = nil
         #expect(model.selectedFont == nil)
-        model.selection = "Arimo"
-        #expect(model.selectedFont?.name == "Arimo")
+        model.selection = "SourceCodePro"
+        #expect(model.selectedFont?.name == "Source Code Pro")
     }
 
     @Test func previewDefaultsToMainTypefaceAndKeepsVariant() async throws {
@@ -202,6 +203,63 @@ struct AppModelTests {
 
         let reopened = Fixtures.model(defaults: defaults)
         #expect(reopened.favorites == ["Arimo"])
+    }
+
+    // MARK: Selection
+
+    @Test func selectsAFontAtLaunch() async throws {
+        // Nothing known: the first font.
+        #expect(await loadedModel().selection == "Arimo")
+
+        // An installed font beats the first one; a favorite beats both.
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["SauceCodeProNerdFont-Regular.ttf"])
+        let defaults = Fixtures.defaults()
+        let model = Fixtures.model(library: library, defaults: defaults)
+        await model.loadCatalog()
+        #expect(model.selection == "SourceCodePro")
+
+        model.toggleFavorite("JetBrainsMono")
+        let withFavorite = Fixtures.model(library: library, defaults: Fixtures.defaults())
+        withFavorite.toggleFavorite("JetBrainsMono")
+        await withFavorite.loadCatalog()
+        #expect(withFavorite.selection == "JetBrainsMono")
+    }
+
+    @Test func remembersSelectionAcrossLaunches() async {
+        let defaults = Fixtures.defaults()
+        let first = Fixtures.model(defaults: defaults)
+        await first.loadCatalog()
+        first.selection = "SourceCodePro"
+
+        let reopened = Fixtures.model(defaults: defaults)
+        await reopened.loadCatalog()
+        #expect(reopened.selection == "SourceCodePro")
+    }
+
+    @Test func installedFacesPreferTheMainTypeface() async throws {
+        let library = Fixtures.library()
+        let font = URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf")
+        try FileManager.default.createDirectory(at: library.userFonts, withIntermediateDirectories: true)
+        for name in ["JetBrainsMonoNLNerdFont-Regular.ttf", "JetBrainsMonoNerdFont-Regular.ttf", "JetBrainsMonoNerdFontMono-Regular.ttf"] {
+            try FileManager.default.copyItem(at: font, to: library.userFonts.appending(path: name))
+        }
+        let model = await loadedModel(library: library)
+        #expect(model.installedFaces["JetBrainsMono"]?.url.lastPathComponent == "JetBrainsMonoNerdFont-Regular.ttf")
+        #expect(model.installedFaces["Arimo"] == nil)
+    }
+
+    @Test func selectedPreviewFaceWaitsForTheNewFont() async throws {
+        let library = Fixtures.library()
+        let font = URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf")
+        try FileManager.default.createDirectory(at: library.userFonts, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: font, to: library.userFonts.appending(path: "ArimoNerdFont-Regular.ttf"))
+        let model = await loadedModel(library: library)
+        model.selection = "Arimo"
+        await model.loadPreview()
+        #expect(model.selectedPreviewFace != nil)
+        model.selection = "SourceCodePro"
+        #expect(model.selectedPreviewFace == nil)
     }
 
     // MARK: Cache

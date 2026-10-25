@@ -33,14 +33,21 @@ public final class AppModel {
     public private(set) var catalogState = CatalogState.loading
     public var searchText = ""
     public var filter = Filter.all
-    public var selection: FontFamily.ID?
+    /// Remembered across launches, so the app reopens where you left off.
+    public var selection: FontFamily.ID? {
+        didSet { defaults.set(selection, forKey: Self.selectionKey) }
+    }
 
     public private(set) var installed: [FontFamily.ID: Installation] = [:]
+    /// A Regular face of each installed family's main typeface, for drawing its name in the sidebar.
+    public private(set) var installedFaces: [FontFamily.ID: FontFace] = [:]
     public private(set) var operations: [FontFamily.ID: Operation] = [:]
     /// Message for the most recent failed install or uninstall.
     public var failure: String?
 
     public private(set) var preview = PreviewState.loading(nil)
+    /// Which font the loaded preview belongs to; briefly the previous one right after switching.
+    private var previewFontID: FontFamily.ID?
     /// Kept across fonts: most people want the same variant everywhere.
     public var variant = FontFace.Variant.mono
     private var chosenBaseName: String?
@@ -54,6 +61,7 @@ public final class AppModel {
     private let library: FontLibrary
     private let defaults: UserDefaults
     private static let favoritesKey = "favorites"
+    private static let selectionKey = "selection"
     /// Identifies the latest preview load so slower, older loads can't overwrite it.
     private var previewToken = UUID()
     /// Same, for scans of the Fonts folders.
@@ -136,9 +144,22 @@ public final class AppModel {
             }
             catalogState = .loaded(catalog)
             await refreshInstalled()
+            selectInitialFont(in: catalog)
         } catch {
             catalogState = .failed
         }
+    }
+
+    /// The last font you looked at, or else a favorite, an installed font, or the first one.
+    /// Never leaves the window on an empty "nothing selected" screen at launch.
+    private func selectInitialFont(in catalog: Catalog) {
+        guard selection == nil || !catalog.fonts.contains(where: { $0.id == selection }) else { return }
+        let ids = catalog.fonts.map(\.id)
+        let remembered = defaults.string(forKey: Self.selectionKey).flatMap { ids.contains($0) ? $0 : nil }
+        selection = remembered
+            ?? ids.first(where: favorites.contains)
+            ?? ids.first { installed[$0] != nil }
+            ?? ids.first
     }
 
     // MARK: Install
@@ -152,6 +173,14 @@ public final class AppModel {
         // A newer scan started meanwhile; its snapshot is fresher than ours.
         guard scanToken == token else { return }
         installed = result
+        var faces: [FontFamily.ID: FontFace] = [:]
+        for (id, installation) in result {
+            let regular = FontStore.faces(choosingFrom: installation.files).filter { $0.variant == .standard }
+            // The family's main typeface (JetBrainsMono, not JetBrainsMonoNL) when there is one.
+            let main = catalog.fonts.first { $0.id == id }?.patchedName
+            faces[id] = regular.first { $0.baseName == main } ?? regular.first
+        }
+        installedFaces = faces
     }
 
     /// Release tag without the "v", e.g. "3.5.1".
@@ -238,6 +267,7 @@ public final class AppModel {
             let faces = FontStore.faces(choosingFrom: installation.files)
             if !faces.isEmpty {
                 preview = .loaded(faces)
+                previewFontID = font.id
                 return
             }
         }
@@ -253,6 +283,7 @@ public final class AppModel {
             }
             guard previewToken == token else { return }
             preview = faces.isEmpty ? .failed : .loaded(faces)
+            previewFontID = font.id
         } catch {
             guard previewToken == token else { return }
             preview = .failed
@@ -287,6 +318,11 @@ public final class AppModel {
     public var shownVariant: FontFace.Variant {
         get { previewFace?.variant ?? variant }
         set { variant = newValue }
+    }
+
+    /// `previewFace`, but only once it belongs to the selected font, e.g. for drawing its title.
+    public var selectedPreviewFace: FontFace? {
+        previewFontID == selectedFont?.id ? previewFace : nil
     }
 
     /// The face to render: the chosen typeface and variant, falling back to any variant of that typeface.

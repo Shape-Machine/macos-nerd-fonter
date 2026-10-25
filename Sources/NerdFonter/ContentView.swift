@@ -13,10 +13,16 @@ struct ContentView: View {
             if let font = model.selectedFont {
                 FontDetailView(font: font, model: model)
                     .task(id: font.id) { await model.loadPreview() }
-            } else {
-                ContentUnavailableView("No Font Selected", systemImage: "textformat")
+            } else if case .loaded(let catalog) = model.catalogState {
+                // Only when search or a filter hides the selection; at launch a font is always selected.
+                ContentUnavailableView {
+                    Label("Nerd Fonter", systemImage: "textformat")
+                } description: {
+                    Text(summary(of: catalog))
+                }
             }
         }
+        .tint(Theme.accent)
         .searchable(text: $model.searchText, placement: .sidebar, prompt: "Search fonts")
         .task { await model.loadCatalog() }
         // Pick up fonts installed or removed elsewhere (Homebrew, Font Book) while we were in the background.
@@ -44,7 +50,12 @@ struct ContentView: View {
         case .loaded:
             List(model.fonts, selection: $model.selection) { font in
                 HStack(spacing: 6) {
-                    Text(font.name)
+                    // Installed fonts show their name in their own face; the rest stay in the system font.
+                    if let face = model.installedFaces[font.id] {
+                        Text(font.name).font(Font(face.font(size: NSFont.systemFontSize)))
+                    } else {
+                        Text(font.name)
+                    }
                     Spacer()
                     if model.favorites.contains(font.id) {
                         Image(systemName: "star.fill").foregroundStyle(.yellow).imageScale(.small)
@@ -76,6 +87,7 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 10)
                 .padding(.bottom, 6)
             }
@@ -89,6 +101,16 @@ struct ContentView: View {
                 }
             }
         }
+    }
+}
+
+extension ContentView {
+    /// "72 fonts · 5 installed · 2 updates"
+    private func summary(of catalog: Catalog) -> String {
+        let updates = model.installed.keys.filter(model.isUpdateAvailable).count
+        var parts = ["\(catalog.fonts.count) fonts", "\(model.installed.count) installed"]
+        if updates > 0 { parts.append("\(updates) update\(updates == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
     }
 }
 
