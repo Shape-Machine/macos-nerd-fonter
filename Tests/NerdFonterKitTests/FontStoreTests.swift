@@ -17,6 +17,16 @@ struct FontFaceTests {
         }
     }
 
+    @Test func readsFamilyNameFromTheFile() throws {
+        // FontFace needs a release-style file name, so read a system font through one.
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let copy = dir.appending(path: "TestNerdFontMono-Regular.ttf")
+        try FileManager.default.copyItem(at: URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf"), to: copy)
+        let face = try #require(FontFace(url: copy))
+        #expect(face.familyName == "Andale Mono")
+    }
+
     @Test func rejectsOtherFiles() {
         #expect(FontFace.parse(fileName: "LICENSE.txt") == nil)
         #expect(FontFace.parse(fileName: "Hack-Regular.ttf") == nil)

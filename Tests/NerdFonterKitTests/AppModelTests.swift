@@ -106,6 +106,31 @@ struct AppModelTests {
         #expect(faces.map(\.url.lastPathComponent).sorted() == ["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
     }
 
+    @Test func installedFamilyNameOnlyForInstalledFaces() async throws {
+        let library = Fixtures.library()
+        let font = URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf")
+        try FileManager.default.createDirectory(at: library.userFonts, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: font, to: library.userFonts.appending(path: "ArimoNerdFont-Regular.ttf"))
+        // Installed too, but its (empty) file can't be previewed, so its preview is downloaded.
+        try Fixtures.touch(library.userFonts, ["JetBrainsMonoNerdFont-Regular.ttf"])
+        let archive = try FontStoreTests.makeArchive(["JetBrainsMonoNerdFont-Regular.ttf"])
+        let model = Fixtures.model(fontStore: FontStoreTests.store(serving: archive, counter: .init()), library: library)
+        await model.loadCatalog()
+
+        model.selection = "Arimo"
+        await model.loadPreview()
+        #expect(model.installedFamilyName == "Andale Mono")
+
+        // Switched, but Arimo's preview is still on screen until the new one loads.
+        model.selection = "JetBrainsMono"
+        #expect(model.installedFamilyName == nil)
+
+        // Downloaded preview: its name isn't necessarily the installed one.
+        await model.loadPreview()
+        #expect(model.previewFace != nil)
+        #expect(model.installedFamilyName == nil)
+    }
+
     @Test func installsAndUninstalls() async throws {
         let archive = try FontStoreTests.makeArchive(["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
         let library = Fixtures.library()

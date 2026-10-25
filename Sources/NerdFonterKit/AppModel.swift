@@ -294,4 +294,15 @@ public final class AppModel {
         let candidates = faces.filter { $0.baseName == baseName }
         return candidates.first { $0.variant == variant } ?? candidates.first
     }
+
+    /// The family name to paste into editor settings, e.g. "JetBrainsMono Nerd Font Mono".
+    /// Only when the face on screen is one of the selected font's installed files: a downloaded
+    /// preview (say, official Meslo while Powerlevel10k's "MesloLGS NF" is installed) or a face
+    /// left over from the previously selected font would give a name the editor can't find.
+    public var installedFamilyName: String? {
+        guard let font = selectedFont, let face = previewFace, let installation = installed[font.id],
+              installation.files.contains(where: { $0.standardizedFileURL == face.url.standardizedFileURL })
+        else { return nil }
+        return face.familyName
+    }
 }

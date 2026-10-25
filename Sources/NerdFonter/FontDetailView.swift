@@ -13,6 +13,10 @@ struct FontDetailView: View {
                     HStack(spacing: 8) {
                         Text(font.name).font(.largeTitle.weight(.semibold))
                         FavoriteButton(id: font.id, model: model)
+                        if let name = model.installedFamilyName {
+                            CopyNameButton(name: name)
+                                .padding(.leading, 4)
+                        }
                     }
                     Text(font.description).foregroundStyle(.secondary)
                     Text(details).font(.callout).foregroundStyle(.tertiary)
@@ -68,6 +72,42 @@ struct FavoriteButton: View {
         }
         .buttonStyle(.plain)
         .help(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+    }
+}
+
+/// The exact family name of the shown variant, e.g. "JetBrainsMono Nerd Font Mono". Click to copy.
+private struct CopyNameButton: View {
+    let name: String
+    /// Set on each click; restarting the task below restarts the timer, so a later click never
+    /// has its checkmark cleared by an earlier one.
+    @State private var copiedAt: Date?
+    private var copied: Bool { copiedAt != nil }
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(name, forType: .string)
+            copiedAt = .now
+        } label: {
+            HStack(spacing: 6) {
+                Text(name).font(.system(.callout, design: .monospaced))
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .foregroundStyle(copied ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(.quaternary.opacity(0.6), in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .help("Copy the font name for your editor or terminal settings")
+        .onChange(of: name) { copiedAt = nil }
+        .task(id: copiedAt) {
+            guard copiedAt != nil else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled { copiedAt = nil }
+        }
     }
 }
 
