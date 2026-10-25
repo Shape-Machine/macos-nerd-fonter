@@ -47,7 +47,9 @@ private struct LoadingView: View {
     @State private var isVisible = false
 
     var body: some View {
-        Group {
+        // Color.clear keeps this a real view even when nothing is shown, so `.task` runs.
+        ZStack {
+            Color.clear
             if let progress, progress < 1 {
                 ProgressView(value: progress) { Text("Downloading \(fontName)…") }
                     .frame(maxWidth: 260)
