@@ -148,12 +148,14 @@ private struct FontRow: View {
         .padding(.vertical, 2)
     }
 
+    /// What's worth knowing at a glance. Never just "Installed": the section header, the filter
+    /// and the name drawn in its own face already say that.
     private var subtitle: String {
         if let installation = model.installed[font.id] {
             if model.isUpdateAvailable(font.id), let current = installation.nerdFontsVersion {
                 return "Update · \(current) → \(model.latestVersion ?? "")"
             }
-            return installation.isSystemWide ? "Installed for all users" : "Installed"
+            if installation.isSystemWide { return "Installed for all users" }
         }
         return "\(font.isMonospaced ? "Mono" : "Proportional") · \(font.licenseId)"
     }
