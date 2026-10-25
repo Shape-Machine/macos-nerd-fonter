@@ -38,6 +38,39 @@ enum Fixtures {
         CatalogStore(cacheFile: cacheFile, fetch: { try server.fetch($0) }, now: { now })
     }
 
+    /// A library over empty temp folders. Metadata comes from release-style file names, so tests
+    /// don't need real Nerd Font files: `JetBrainsMonoNerdFontMono-Regular.ttf` reads as family
+    /// "JetBrainsMono Nerd Font Mono", patched with `version` (or the version in a `@3.3.0` name suffix).
+    static func library(version: String = "3.5.1") -> FontLibrary {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        return FontLibrary(
+            userFonts: root.appending(path: "User"), systemFonts: root.appending(path: "System"),
+            readMetadata: { url in
+                let name = url.deletingPathExtension().lastPathComponent
+                let fileVersion = name.split(separator: "@").dropFirst().first.map(String.init)
+                let fileName = name.split(separator: "@").first.map { "\($0).\(url.pathExtension)" } ?? ""
+                guard let (base, variant) = FontFace.parse(fileName: fileName) else { return nil }
+                let suffix = variant == .standard ? "" : " \(variant.rawValue)"
+                return .init(familyName: "\(base) Nerd Font\(suffix)", version: "Version 1.0;Nerd Fonts \(fileVersion ?? version)")
+            },
+            remove: { try FileManager.default.removeItem(at: $0) })
+    }
+
+    @MainActor
+    static func model(fontStore: FontStore? = nil, library: FontLibrary = library()) -> AppModel {
+        AppModel(
+            store: store(Server(), cacheFile: tempFile()),
+            fontStore: fontStore ?? FontStore(root: tempFile()) { _, _ in throw URLError(.notConnectedToInternet) },
+            library: library)
+    }
+
+    static func touch(_ dir: URL, _ names: [String]) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for name in names {
+            try Data().write(to: dir.appending(path: name))
+        }
+    }
+
     static func tempFile() -> URL {
         FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString)

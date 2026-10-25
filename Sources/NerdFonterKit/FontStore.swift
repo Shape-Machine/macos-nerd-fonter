@@ -50,7 +50,7 @@ public struct FontStore: Sendable {
     }
 
     /// Cached `.tar.xz` for a family, downloaded once per release.
-    func archive(for font: FontFamily, release: String, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+    public func archive(for font: FontFamily, release: String, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let fm = FileManager.default
         let file = root.appending(path: release).appending(path: "\(font.folderName).tar.xz")
         if fm.fileExists(atPath: file.path) { return file }
@@ -76,6 +76,12 @@ public struct FontStore: Sendable {
         return groups.values.compactMap { files in
             files.first { $0.hasSuffix("-Regular.ttf") || $0.hasSuffix("-Regular.otf") } ?? files.first
         }.sorted()
+    }
+
+    /// Preview faces picked from files already on disk, e.g. an installed family.
+    public static func faces(choosingFrom files: [URL]) -> [FontFace] {
+        let byName = Dictionary(files.map { ($0.lastPathComponent, $0) }) { first, _ in first }
+        return previewNames(from: Array(byName.keys)).compactMap { byName[$0] }.compactMap(FontFace.init(url:))
     }
 
     static func faces(in dir: URL) -> [FontFace] {

@@ -4,8 +4,8 @@ import Testing
 
 @MainActor
 struct AppModelTests {
-    private func loadedModel() async -> AppModel {
-        let model = AppModel(store: Fixtures.store(Fixtures.Server(), cacheFile: Fixtures.tempFile()))
+    private func loadedModel(library: FontLibrary = Fixtures.library()) async -> AppModel {
+        let model = Fixtures.model(library: library)
         await model.loadCatalog()
         return model
     }
@@ -16,7 +16,9 @@ struct AppModelTests {
     }
 
     @Test func failsWhenOfflineWithoutCache() async {
-        let model = AppModel(store: Fixtures.store(Fixtures.Server(offline: true), cacheFile: Fixtures.tempFile()))
+        let model = AppModel(
+            store: Fixtures.store(Fixtures.Server(offline: true), cacheFile: Fixtures.tempFile()),
+            library: Fixtures.library())
         await model.loadCatalog()
         #expect(model.catalogState == .failed)
         #expect(model.fonts.isEmpty)
@@ -44,9 +46,7 @@ struct AppModelTests {
             "JetBrainsMonoNerdFont-Regular.ttf", "JetBrainsMonoNerdFontMono-Regular.ttf",
             "JetBrainsMonoNLNerdFont-Regular.ttf",
         ])
-        let model = AppModel(
-            store: Fixtures.store(Fixtures.Server(), cacheFile: Fixtures.tempFile()),
-            fontStore: FontStoreTests.store(serving: archive, counter: .init()))
+        let model = Fixtures.model(fontStore: FontStoreTests.store(serving: archive, counter: .init()))
         await model.loadCatalog()
         model.selection = "JetBrainsMono"
         await model.loadPreview()
@@ -63,10 +63,7 @@ struct AppModelTests {
     }
 
     @Test func previewFailsWhenDownloadFails() async {
-        let model = AppModel(
-            store: Fixtures.store(Fixtures.Server(), cacheFile: Fixtures.tempFile()),
-            fontStore: FontStore(root: Fixtures.tempFile()) { _, _ in throw URLError(.notConnectedToInternet) })
-        await model.loadCatalog()
+        let model = await loadedModel()
         model.selection = "Arimo"
         await model.loadPreview()
         #expect(model.preview == .failed)
@@ -79,5 +76,58 @@ struct AppModelTests {
         #expect(model.selectedFont == nil)
         model.searchText = ""
         #expect(model.selectedFont?.name == "Arimo")
+    }
+
+    @Test func detectsInstalledFontsAndFilters() async throws {
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["ArimoNerdFont-Regular.ttf"])
+        let model = await loadedModel(library: library)
+
+        #expect(model.installed.keys.sorted() == ["Arimo"])
+        model.filter = .installed
+        #expect(model.fonts.map(\.id) == ["Arimo"])
+    }
+
+    @Test func previewsInstalledFontWithoutDownloading() async throws {
+        let library = Fixtures.library()
+        let font = URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf")
+        try FileManager.default.createDirectory(at: library.userFonts, withIntermediateDirectories: true)
+        for name in ["ArimoNerdFont-Regular.ttf", "ArimoNerdFont-Bold.ttf", "ArimoNerdFontMono-Regular.ttf"] {
+            try FileManager.default.copyItem(at: font, to: library.userFonts.appending(path: name))
+        }
+        let model = await loadedModel(library: library)  // its font store is offline
+        model.selection = "Arimo"
+        await model.loadPreview()
+
+        guard case .loaded(let faces) = model.preview else {
+            Issue.record("expected a loaded preview, got \(model.preview)")
+            return
+        }
+        #expect(faces.map(\.url.lastPathComponent).sorted() == ["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
+    }
+
+    @Test func installsAndUninstalls() async throws {
+        let archive = try FontStoreTests.makeArchive(["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
+        let library = Fixtures.library()
+        let model = Fixtures.model(fontStore: FontStoreTests.store(serving: archive, counter: .init()), library: library)
+        await model.loadCatalog()
+        let arimo = try #require(model.fonts.first { $0.id == "Arimo" })
+
+        await model.install(arimo)
+        #expect(model.installed["Arimo"]?.files.count == 2)
+        #expect(model.operations.isEmpty)
+        #expect(model.failure == nil)
+
+        await model.uninstall(arimo)
+        #expect(model.installed["Arimo"] == nil)
+        #expect(FontLibrary.fontFiles(in: library.userFonts).isEmpty)
+    }
+
+    @Test func reportsInstallFailure() async throws {
+        let model = await loadedModel()
+        let arimo = try #require(model.fonts.first { $0.id == "Arimo" })
+        await model.install(arimo)
+        #expect(model.failure?.contains("Arimo") == true)
+        #expect(model.operations.isEmpty)
     }
 }

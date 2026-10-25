@@ -18,9 +18,26 @@ public final class AppModel {
         case failed
     }
 
+    public enum Filter: String, CaseIterable, Identifiable {
+        case all = "All", installed = "Installed"
+        public var id: Self { self }
+    }
+
+    public enum Operation: Equatable {
+        /// Download progress, or nil while connecting or unpacking.
+        case installing(Double?)
+        case uninstalling
+    }
+
     public private(set) var catalogState = CatalogState.loading
     public var searchText = ""
+    public var filter = Filter.all
     public var selection: FontFamily.ID?
+
+    public private(set) var installed: [FontFamily.ID: Installation] = [:]
+    public private(set) var operations: [FontFamily.ID: Operation] = [:]
+    /// Message for the most recent failed install or uninstall.
+    public var failure: String?
 
     public private(set) var preview = PreviewState.loading(nil)
     /// Kept across fonts: most people want the same variant everywhere.
@@ -31,12 +48,16 @@ public final class AppModel {
 
     private let store: CatalogStore
     private let fontStore: FontStore
+    private let library: FontLibrary
     /// Identifies the latest preview load so slower, older loads can't overwrite it.
     private var previewToken = UUID()
+    /// Same, for scans of the Fonts folders.
+    private var scanToken = UUID()
 
-    public init(store: CatalogStore = .live, fontStore: FontStore = .live) {
+    public init(store: CatalogStore = .live, fontStore: FontStore = .live, library: FontLibrary = .live) {
         self.store = store
         self.fontStore = fontStore
+        self.library = library
     }
 
     // MARK: Catalog
@@ -44,9 +65,10 @@ public final class AppModel {
     public var fonts: [FontFamily] {
         guard case .loaded(let catalog) = catalogState else { return [] }
         let query = searchText.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return catalog.fonts }
-        return catalog.fonts.filter {
-            $0.name.localizedStandardContains(query) || $0.patchedName.localizedStandardContains(query)
+        return catalog.fonts.filter { font in
+            (filter == .all || installed[font.id] != nil)
+                && (query.isEmpty || font.name.localizedStandardContains(query)
+                    || font.patchedName.localizedStandardContains(query))
         }
     }
 
@@ -60,9 +82,55 @@ public final class AppModel {
         catalogState = .loading
         do {
             catalogState = .loaded(try await store.load())
+            await refreshInstalled()
         } catch {
             catalogState = .failed
         }
+    }
+
+    // MARK: Install
+
+    /// Re-reads the Fonts folders. Cheap enough to run whenever the app becomes active.
+    public func refreshInstalled() async {
+        guard case .loaded(let catalog) = catalogState else { return }
+        let token = UUID()
+        scanToken = token
+        let result = await library.scan(catalog: catalog.fonts)
+        // A newer scan started meanwhile; its snapshot is fresher than ours.
+        guard scanToken == token else { return }
+        installed = result
+    }
+
+    public func install(_ font: FontFamily) async {
+        guard case .loaded(let catalog) = catalogState, operations[font.id] == nil else { return }
+        operations[font.id] = .installing(nil)
+        defer { operations[font.id] = nil }
+        do {
+            let archive = try await fontStore.archive(for: font, release: catalog.release) { progress in
+                Task { @MainActor [weak self] in
+                    guard let self, case .installing = self.operations[font.id] else { return }
+                    self.operations[font.id] = .installing(progress)
+                }
+            }
+            _ = try await library.install(archive: archive)
+        } catch {
+            failure = "Couldn't install \(font.name). \(error.localizedDescription)"
+        }
+        await refreshInstalled()
+    }
+
+    public func uninstall(_ font: FontFamily) async {
+        guard let installation = installed[font.id], operations[font.id] == nil else { return }
+        operations[font.id] = .uninstalling
+        defer { operations[font.id] = nil }
+        do {
+            try await library.uninstall(installation)
+        } catch {
+            failure = "Couldn't uninstall \(font.name). \(error.localizedDescription)"
+        }
+        await refreshInstalled()
+        // The preview may have been reading the files we just trashed.
+        if selectedFont?.id == font.id { await loadPreview() }
     }
 
     // MARK: Preview
@@ -72,6 +140,15 @@ public final class AppModel {
         let token = UUID()
         previewToken = token
         chosenBaseName = nil
+        // Installed families preview from their own files, no download needed. Files that don't
+        // follow the release naming (e.g. pre-3.0 installs) fall through to the download.
+        if let installation = installed[font.id] {
+            let faces = FontStore.faces(choosingFrom: installation.files)
+            if !faces.isEmpty {
+                preview = .loaded(faces)
+                return
+            }
+        }
         preview = .loading(nil)
         do {
             let faces = try await fontStore.previewFaces(for: font, release: catalog.release) { progress in
