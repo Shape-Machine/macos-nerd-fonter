@@ -19,13 +19,14 @@ public final class AppModel {
     }
 
     public enum Filter: String, CaseIterable, Identifiable {
-        case all = "All", installed = "Installed"
+        case all = "All", installed = "Installed", favorites = "Favorites", updates = "Updates"
         public var id: Self { self }
     }
 
     public enum Operation: Equatable {
         /// Download progress, or nil while connecting or unpacking.
         case installing(Double?)
+        case updating(Double?)
         case uninstalling
     }
 
@@ -46,18 +47,27 @@ public final class AppModel {
     public var previewText = PreviewSample.text
     public var previewSize = 16.0
 
+    public private(set) var favorites: Set<FontFamily.ID>
+
     private let store: CatalogStore
     private let fontStore: FontStore
     private let library: FontLibrary
+    private let defaults: UserDefaults
+    private static let favoritesKey = "favorites"
     /// Identifies the latest preview load so slower, older loads can't overwrite it.
     private var previewToken = UUID()
     /// Same, for scans of the Fonts folders.
     private var scanToken = UUID()
 
-    public init(store: CatalogStore = .live, fontStore: FontStore = .live, library: FontLibrary = .live) {
+    public init(
+        store: CatalogStore = .live, fontStore: FontStore = .live, library: FontLibrary = .live,
+        defaults: UserDefaults = .standard
+    ) {
         self.store = store
         self.fontStore = fontStore
         self.library = library
+        self.defaults = defaults
+        favorites = Set(defaults.stringArray(forKey: Self.favoritesKey) ?? [])
     }
 
     // MARK: Catalog
@@ -66,10 +76,23 @@ public final class AppModel {
         guard case .loaded(let catalog) = catalogState else { return [] }
         let query = searchText.trimmingCharacters(in: .whitespaces)
         return catalog.fonts.filter { font in
-            (filter == .all || installed[font.id] != nil)
+            let inFilter = switch filter {
+            case .all: true
+            case .installed: installed[font.id] != nil
+            case .favorites: favorites.contains(font.id)
+            case .updates: isUpdateAvailable(font.id)
+            }
+            return inFilter
                 && (query.isEmpty || font.name.localizedStandardContains(query)
                     || font.patchedName.localizedStandardContains(query))
         }
+    }
+
+    // MARK: Favorites
+
+    public func toggleFavorite(_ id: FontFamily.ID) {
+        if favorites.remove(id) == nil { favorites.insert(id) }
+        defaults.set(favorites.sorted(), forKey: Self.favoritesKey)
     }
 
     /// Only resolves while the selection is visible, so search never leaves a hidden font on screen.
@@ -101,22 +124,54 @@ public final class AppModel {
         installed = result
     }
 
+    /// Release tag without the "v", e.g. "3.5.1".
+    public var latestVersion: String? {
+        guard case .loaded(let catalog) = catalogState else { return nil }
+        return String(catalog.release.trimmingPrefix("v"))
+    }
+
+    /// True when the family was patched with an older Nerd Fonts release and we're allowed to replace it.
+    /// Unknown versions (e.g. third-party "NF" builds) are left alone: replacing them would change family names.
+    public func isUpdateAvailable(_ id: FontFamily.ID) -> Bool {
+        guard let installation = installed[id], !installation.isSystemWide,
+              let current = installation.nerdFontsVersion, let latest = latestVersion
+        else { return false }
+        return current.compare(latest, options: .numeric) == .orderedAscending
+    }
+
     public func install(_ font: FontFamily) async {
+        await installLatest(font, replacing: nil)
+    }
+
+    public func update(_ font: FontFamily) async {
+        guard let old = installed[font.id], isUpdateAvailable(font.id) else { return }
+        await installLatest(font, replacing: old)
+    }
+
+    /// Installs the latest release; for an update, then trashes old files the new release didn't replace.
+    private func installLatest(_ font: FontFamily, replacing old: Installation?) async {
         guard case .loaded(let catalog) = catalogState, operations[font.id] == nil else { return }
-        operations[font.id] = .installing(nil)
+        let isUpdate = old != nil
+        operations[font.id] = isUpdate ? .updating(nil) : .installing(nil)
         defer { operations[font.id] = nil }
         do {
             let archive = try await fontStore.archive(for: font, release: catalog.release) { progress in
                 Task { @MainActor [weak self] in
-                    guard let self, case .installing = self.operations[font.id] else { return }
-                    self.operations[font.id] = .installing(progress)
+                    guard let self, self.operations[font.id] != nil else { return }
+                    self.operations[font.id] = isUpdate ? .updating(progress) : .installing(progress)
                 }
             }
-            _ = try await library.install(archive: archive)
+            let added = Set(try await library.install(archive: archive).map { $0.resolvingSymlinksInPath() })
+            if let old {
+                let leftovers = old.files.filter { !added.contains($0.resolvingSymlinksInPath()) }
+                try await library.uninstall(Installation(files: leftovers, isSystemWide: false))
+            }
         } catch {
-            failure = "Couldn't install \(font.name). \(error.localizedDescription)"
+            failure = "Couldn't \(isUpdate ? "update" : "install") \(font.name). \(error.localizedDescription)"
         }
         await refreshInstalled()
+        // The preview may have been reading files we just replaced.
+        if isUpdate, selectedFont?.id == font.id { await loadPreview() }
     }
 
     public func uninstall(_ font: FontFamily) async {

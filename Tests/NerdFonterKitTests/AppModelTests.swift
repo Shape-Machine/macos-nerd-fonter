@@ -18,7 +18,7 @@ struct AppModelTests {
     @Test func failsWhenOfflineWithoutCache() async {
         let model = AppModel(
             store: Fixtures.store(Fixtures.Server(offline: true), cacheFile: Fixtures.tempFile()),
-            library: Fixtures.library())
+            library: Fixtures.library(), defaults: Fixtures.defaults())
         await model.loadCatalog()
         #expect(model.catalogState == .failed)
         #expect(model.fonts.isEmpty)
@@ -129,5 +129,53 @@ struct AppModelTests {
         await model.install(arimo)
         #expect(model.failure?.contains("Arimo") == true)
         #expect(model.operations.isEmpty)
+    }
+
+    // MARK: Updates
+
+    @Test func offersUpdateForOlderReleaseAndReplacesLeftovers() async throws {
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["ArimoNerdFont-Regular@3.3.0.ttf", "ArimoNerdFont-Italic@3.3.0.ttf"])
+        let archive = try FontStoreTests.makeArchive(["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
+        let model = Fixtures.model(fontStore: FontStoreTests.store(serving: archive, counter: .init()), library: library)
+        await model.loadCatalog()
+        let arimo = try #require(model.fonts.first { $0.id == "Arimo" })
+
+        #expect(model.isUpdateAvailable("Arimo"))
+        model.filter = .updates
+        #expect(model.fonts.map(\.id) == ["Arimo"])
+
+        await model.update(arimo)
+        #expect(model.failure == nil)
+        #expect(!model.isUpdateAvailable("Arimo"))
+        #expect(model.installed["Arimo"]?.nerdFontsVersion == "3.5.1")
+        let files = try FileManager.default.contentsOfDirectory(atPath: library.userFonts.path).sorted()
+        #expect(files == ["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
+    }
+
+    @Test func noUpdateForCurrentOrSystemWideFonts() async throws {
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["ArimoNerdFont-Regular.ttf"])
+        try Fixtures.touch(library.systemFonts, ["JetBrainsMonoNerdFont-Regular@3.3.0.ttf"])
+        let model = await loadedModel(library: library)
+        #expect(!model.isUpdateAvailable("Arimo"))
+        #expect(!model.isUpdateAvailable("JetBrainsMono"))
+        #expect(model.installed["JetBrainsMono"]?.isSystemWide == true)
+    }
+
+    // MARK: Favorites
+
+    @Test func favoritesFilterAndPersist() async {
+        let defaults = Fixtures.defaults()
+        let model = Fixtures.model(defaults: defaults)
+        await model.loadCatalog()
+        model.toggleFavorite("Arimo")
+        model.toggleFavorite("SourceCodePro")
+        model.toggleFavorite("SourceCodePro")
+        model.filter = .favorites
+        #expect(model.fonts.map(\.id) == ["Arimo"])
+
+        let reopened = Fixtures.model(defaults: defaults)
+        #expect(reopened.favorites == ["Arimo"])
     }
 }

@@ -57,11 +57,19 @@ enum Fixtures {
     }
 
     @MainActor
-    static func model(fontStore: FontStore? = nil, library: FontLibrary = library()) -> AppModel {
+    static func model(
+        fontStore: FontStore? = nil, library: FontLibrary = library(), defaults: UserDefaults = defaults()
+    ) -> AppModel {
         AppModel(
             store: store(Server(), cacheFile: tempFile()),
             fontStore: fontStore ?? FontStore(root: tempFile()) { _, _ in throw URLError(.notConnectedToInternet) },
-            library: library)
+            library: library,
+            defaults: defaults)
+    }
+
+    /// Throwaway defaults, so tests never touch the app's real preferences.
+    static func defaults() -> UserDefaults {
+        UserDefaults(suiteName: "NerdFonterTests-\(UUID().uuidString)")!
     }
 
     static func touch(_ dir: URL, _ names: [String]) throws {
