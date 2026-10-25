@@ -249,6 +249,32 @@ struct AppModelTests {
         #expect(model.installedFaces["Arimo"] == nil)
     }
 
+    @Test func installedFacesFallBackToAnyVariant() async throws {
+        let library = Fixtures.library()
+        let font = URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf")
+        try FileManager.default.createDirectory(at: library.userFonts, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: font, to: library.userFonts.appending(path: "ArimoNerdFontMono-Regular.ttf"))
+        let model = await loadedModel(library: library)
+        #expect(model.installedFaces["Arimo"]?.variant == .mono)
+    }
+
+    @Test func installedFontsAreKnownWhenTheListAppears() async throws {
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["SauceCodeProNerdFont-Regular.ttf"])
+        let model = Fixtures.model(library: library)
+        let load = Task { await model.loadCatalog() }
+        // Whenever the catalog shows as loaded, the scan and initial selection are already done.
+        while true {
+            if case .loaded = model.catalogState {
+                #expect(model.installed["SourceCodePro"] != nil)
+                #expect(model.selection == "SourceCodePro")
+                break
+            }
+            await Task.yield()
+        }
+        await load.value
+    }
+
     @Test func selectedPreviewFaceWaitsForTheNewFont() async throws {
         let library = Fixtures.library()
         let font = URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf")

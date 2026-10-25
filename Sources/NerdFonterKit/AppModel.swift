@@ -187,9 +187,11 @@ public final class AppModel {
                 didTrimCache = true
                 await fontStore.trim(keeping: catalog.release)
             }
-            catalogState = .loaded(catalog)
-            await refreshInstalled()
+            // Scan and pick a font before the list appears, so launch never flashes
+            // "0 installed" or an empty detail pane.
+            await refreshInstalled(in: catalog)
             selectInitialFont(in: catalog)
+            catalogState = .loaded(catalog)
         } catch {
             catalogState = .failed
         }
@@ -212,20 +214,34 @@ public final class AppModel {
     /// Re-reads the Fonts folders. Cheap enough to run whenever the app becomes active.
     public func refreshInstalled() async {
         guard case .loaded(let catalog) = catalogState else { return }
+        await refreshInstalled(in: catalog)
+    }
+
+    private func refreshInstalled(in catalog: Catalog) async {
         let token = UUID()
         scanToken = token
         let result = await library.scan(catalog: catalog.fonts)
+        let faces = await Self.sidebarFaces(for: result, catalog: catalog)
         // A newer scan started meanwhile; its snapshot is fresher than ours.
         guard scanToken == token else { return }
         installed = result
-        var faces: [FontFamily.ID: FontFace] = [:]
-        for (id, installation) in result {
-            let regular = FontStore.faces(choosingFrom: installation.files).filter { $0.variant == .standard }
-            // The family's main typeface (JetBrainsMono, not JetBrainsMonoNL) when there is one.
-            let main = catalog.fonts.first { $0.id == id }?.patchedName
-            faces[id] = regular.first { $0.baseName == main } ?? regular.first
-        }
         installedFaces = faces
+    }
+
+    /// One face per installed family for its sidebar row: the main typeface's Standard variant
+    /// when there is one, else any installed face. Reads font files, so it runs off the main actor.
+    nonisolated static func sidebarFaces(
+        for installed: [FontFamily.ID: Installation], catalog: Catalog
+    ) async -> [FontFamily.ID: FontFace] {
+        var faces: [FontFamily.ID: FontFace] = [:]
+        for (id, installation) in installed {
+            let candidates = FontStore.faces(choosingFrom: installation.files)
+            let main = catalog.fonts.first { $0.id == id }?.patchedName
+            faces[id] = candidates.first { $0.baseName == main && $0.variant == .standard }
+                ?? candidates.first { $0.variant == .standard }
+                ?? candidates.first
+        }
+        return faces
     }
 
     /// Release tag without the "v", e.g. "3.5.1".

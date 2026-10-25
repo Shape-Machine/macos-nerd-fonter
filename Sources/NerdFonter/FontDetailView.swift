@@ -269,7 +269,7 @@ private struct TerminalCard: View {
                     .font(Font(font))
                     .foregroundStyle(Theme.Terminal.foreground)
                     .scrollContentBackground(.hidden)
-                    .scrollDisabled(true)
+                    // Sized for the sample's lines; scrolls when long lines wrap in a narrow window.
                     .frame(height: editorHeight(lineHeight: Self.lineHeight(of: font)))
                     .padding(.leading, -5)  // TextEditor's own inset; lines up with the prompt
             }
