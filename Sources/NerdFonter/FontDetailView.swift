@@ -13,10 +13,11 @@ struct FontDetailView: View {
                     HStack(spacing: 8) {
                         Text(font.name).font(.largeTitle.weight(.semibold))
                         FavoriteButton(id: font.id, model: model)
-                    }
-                    // Installed fonts preview from their own files, so this is the name editors need.
-                    if model.installed[font.id] != nil, case .loaded = model.preview, let face = model.previewFace {
-                        CopyNameButton(name: face.familyName)
+                        // Installed fonts preview from their own files, so this is the name editors need.
+                        if model.installed[font.id] != nil, case .loaded = model.preview, let face = model.previewFace {
+                            CopyNameButton(name: face.familyName)
+                                .padding(.leading, 4)
+                        }
                     }
                     Text(font.description).foregroundStyle(.secondary)
                     Text(details).font(.callout).foregroundStyle(.tertiary)
