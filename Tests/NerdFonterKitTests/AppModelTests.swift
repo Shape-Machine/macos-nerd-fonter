@@ -88,6 +88,24 @@ struct AppModelTests {
         #expect(model.fonts.map(\.id) == ["Arimo"])
     }
 
+    @Test func previewsInstalledFontWithoutDownloading() async throws {
+        let library = Fixtures.library()
+        let font = URL(filePath: "/System/Library/Fonts/Supplemental/Andale Mono.ttf")
+        try FileManager.default.createDirectory(at: library.userFonts, withIntermediateDirectories: true)
+        for name in ["ArimoNerdFont-Regular.ttf", "ArimoNerdFont-Bold.ttf", "ArimoNerdFontMono-Regular.ttf"] {
+            try FileManager.default.copyItem(at: font, to: library.userFonts.appending(path: name))
+        }
+        let model = await loadedModel(library: library)  // its font store is offline
+        model.selection = "Arimo"
+        await model.loadPreview()
+
+        guard case .loaded(let faces) = model.preview else {
+            Issue.record("expected a loaded preview, got \(model.preview)")
+            return
+        }
+        #expect(faces.map(\.url.lastPathComponent).sorted() == ["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
+    }
+
     @Test func installsAndUninstalls() async throws {
         let archive = try FontStoreTests.makeArchive(["ArimoNerdFont-Regular.ttf", "ArimoNerdFontMono-Regular.ttf"])
         let library = Fixtures.library()

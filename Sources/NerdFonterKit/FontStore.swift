@@ -78,6 +78,12 @@ public struct FontStore: Sendable {
         }.sorted()
     }
 
+    /// Preview faces picked from files already on disk, e.g. an installed family.
+    public static func faces(choosingFrom files: [URL]) -> [FontFace] {
+        let byName = Dictionary(files.map { ($0.lastPathComponent, $0) }) { first, _ in first }
+        return previewNames(from: Array(byName.keys)).compactMap { byName[$0] }.compactMap(FontFace.init(url:))
+    }
+
     static func faces(in dir: URL) -> [FontFace] {
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         return files.compactMap(FontFace.init(url:))

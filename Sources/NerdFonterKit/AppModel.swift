@@ -122,6 +122,8 @@ public final class AppModel {
             failure = "Couldn't uninstall \(font.name). \(error.localizedDescription)"
         }
         await refreshInstalled()
+        // The preview may have been reading the files we just trashed.
+        if selectedFont?.id == font.id { await loadPreview() }
     }
 
     // MARK: Preview
@@ -131,6 +133,15 @@ public final class AppModel {
         let token = UUID()
         previewToken = token
         chosenBaseName = nil
+        // Installed families preview from their own files, no download needed. Files that don't
+        // follow the release naming (e.g. pre-3.0 installs) fall through to the download.
+        if let installation = installed[font.id] {
+            let faces = FontStore.faces(choosingFrom: installation.files)
+            if !faces.isEmpty {
+                preview = .loaded(faces)
+                return
+            }
+        }
         preview = .loading(nil)
         do {
             let faces = try await fontStore.previewFaces(for: font, release: catalog.release) { progress in
