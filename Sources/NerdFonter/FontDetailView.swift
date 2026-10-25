@@ -17,13 +17,8 @@ struct FontDetailView: View {
 
             switch model.preview {
             case .loading(let progress):
-                Group {
-                    if let progress {
-                        ProgressView(value: progress) { Text("Downloading \(font.name)…") }
-                            .frame(maxWidth: 260)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                LoadingView(fontName: font.name, progress: progress)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failed:
                 ContentUnavailableView {
                     Label("Couldn't Load Preview", systemImage: "exclamationmark.triangle")
@@ -41,6 +36,30 @@ struct FontDetailView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(font.name)
+    }
+}
+
+/// Download progress while bytes arrive; a spinner while connecting or unpacking.
+/// The spinner waits a moment so cached previews, which load almost instantly, don't flash.
+private struct LoadingView: View {
+    let fontName: String
+    let progress: Double?
+    @State private var isVisible = false
+
+    var body: some View {
+        Group {
+            if let progress, progress < 1 {
+                ProgressView(value: progress) { Text("Downloading \(fontName)…") }
+                    .frame(maxWidth: 260)
+            } else if isVisible {
+                ProgressView { Text(progress == nil ? "Loading preview…" : "Preparing preview…") }
+            }
+        }
+        .foregroundStyle(.secondary)
+        .task {
+            try? await Task.sleep(for: .milliseconds(250))
+            isVisible = true
+        }
     }
 }
 
