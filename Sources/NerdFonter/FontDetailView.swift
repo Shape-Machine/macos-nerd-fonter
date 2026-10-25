@@ -13,9 +13,8 @@ struct FontDetailView: View {
                     HStack(spacing: 8) {
                         Text(font.name).font(.largeTitle.weight(.semibold))
                         FavoriteButton(id: font.id, model: model)
-                        // Installed fonts preview from their own files, so this is the name editors need.
-                        if model.installed[font.id] != nil, case .loaded = model.preview, let face = model.previewFace {
-                            CopyNameButton(name: face.familyName)
+                        if let name = model.installedFamilyName {
+                            CopyNameButton(name: name)
                                 .padding(.leading, 4)
                         }
                     }
@@ -79,17 +78,16 @@ struct FavoriteButton: View {
 /// The exact family name of the shown variant, e.g. "JetBrainsMono Nerd Font Mono". Click to copy.
 private struct CopyNameButton: View {
     let name: String
-    @State private var copied = false
+    /// Set on each click; restarting the task below restarts the timer, so a later click never
+    /// has its checkmark cleared by an earlier one.
+    @State private var copiedAt: Date?
+    private var copied: Bool { copiedAt != nil }
 
     var body: some View {
         Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(name, forType: .string)
-            copied = true
-            Task {
-                try? await Task.sleep(for: .seconds(1.5))
-                copied = false
-            }
+            copiedAt = .now
         } label: {
             HStack(spacing: 6) {
                 Text(name).font(.system(.callout, design: .monospaced))
@@ -104,7 +102,12 @@ private struct CopyNameButton: View {
         }
         .buttonStyle(.plain)
         .help("Copy the font name for your editor or terminal settings")
-        .onChange(of: name) { copied = false }
+        .onChange(of: name) { copiedAt = nil }
+        .task(id: copiedAt) {
+            guard copiedAt != nil else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            if !Task.isCancelled { copiedAt = nil }
+        }
     }
 }
 
