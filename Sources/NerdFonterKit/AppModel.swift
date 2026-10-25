@@ -157,8 +157,12 @@ public final class AppModel {
         do {
             let archive = try await fontStore.archive(for: font, release: catalog.release) { progress in
                 Task { @MainActor [weak self] in
-                    guard let self, self.operations[font.id] != nil else { return }
-                    self.operations[font.id] = isUpdate ? .updating(progress) : .installing(progress)
+                    // Only while this install or update is still running, never over a later operation.
+                    switch self?.operations[font.id] {
+                    case .installing where !isUpdate: self?.operations[font.id] = .installing(progress)
+                    case .updating where isUpdate: self?.operations[font.id] = .updating(progress)
+                    default: break
+                    }
                 }
             }
             let added = Set(try await library.install(archive: archive).map { $0.resolvingSymlinksInPath() })
