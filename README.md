@@ -2,6 +2,10 @@
 
 A minimal macOS app to browse, preview, install, update, and remove [Nerd Fonts](https://www.nerdfonts.com).
 
+![An installed font: its name set in the font itself, a terminal-style preview, and the exact family name to copy into editor settings](docs/installed.png)
+
+![Previewing a font before installing it](docs/preview.png)
+
 - Live previews of any family before installing — only the faces needed are downloaded.
 - One-click install of all variants (standard, Mono, Propo) into `~/Library/Fonts`.
 - Detects Nerd Fonts installed by other means (Homebrew, by hand) and offers updates.
