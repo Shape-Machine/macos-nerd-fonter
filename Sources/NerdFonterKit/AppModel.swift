@@ -33,14 +33,21 @@ public final class AppModel {
     public private(set) var catalogState = CatalogState.loading
     public var searchText = ""
     public var filter = Filter.all
-    public var selection: FontFamily.ID?
+    /// Remembered across launches, so the app reopens where you left off.
+    public var selection: FontFamily.ID? {
+        didSet { defaults.set(selection, forKey: Self.selectionKey) }
+    }
 
     public private(set) var installed: [FontFamily.ID: Installation] = [:]
+    /// A Regular face of each installed family's main typeface, for drawing its name in the sidebar.
+    public private(set) var installedFaces: [FontFamily.ID: FontFace] = [:]
     public private(set) var operations: [FontFamily.ID: Operation] = [:]
     /// Message for the most recent failed install or uninstall.
     public var failure: String?
 
     public private(set) var preview = PreviewState.loading(nil)
+    /// Which font the loaded preview belongs to; briefly the previous one right after switching.
+    private var previewFontID: FontFamily.ID?
     /// Kept across fonts: most people want the same variant everywhere.
     public var variant = FontFace.Variant.mono
     private var chosenBaseName: String?
@@ -54,6 +61,7 @@ public final class AppModel {
     private let library: FontLibrary
     private let defaults: UserDefaults
     private static let favoritesKey = "favorites"
+    private static let selectionKey = "selection"
     /// Identifies the latest preview load so slower, older loads can't overwrite it.
     private var previewToken = UUID()
     /// Same, for scans of the Fonts folders.
@@ -112,6 +120,51 @@ public final class AppModel {
         if selectedFont != nil { await loadPreview() }
     }
 
+    // MARK: Sidebar
+
+    public struct FontSection: Identifiable, Equatable {
+        /// Nil for a plain, untitled list.
+        public let title: String?
+        public let fonts: [FontFamily]
+        public var id: String { title ?? "" }
+    }
+
+    /// The sidebar list. Browsing everything: your installed fonts first, then the rest under
+    /// A–Z letters. Searching or filtering: one plain list, since it's short or already focused.
+    public var sections: [FontSection] {
+        let fonts = self.fonts
+        guard filter == .all, searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return [FontSection(title: nil, fonts: fonts)]
+        }
+        let mine = fonts.filter { installed[$0.id] != nil }
+        var sections = mine.isEmpty ? [] : [FontSection(title: "Installed", fonts: mine)]
+        var letter: String?
+        var group: [FontFamily] = []
+        for font in fonts where installed[font.id] == nil {
+            let first = font.name.prefix(1).uppercased()
+            let key = first.first?.isLetter == true ? first : "#"
+            if key != letter, let letter {
+                sections.append(FontSection(title: letter, fonts: group))
+                group = []
+            }
+            letter = key
+            group.append(font)
+        }
+        if let letter { sections.append(FontSection(title: letter, fonts: group)) }
+        return sections
+    }
+
+    /// How many fonts each filter shows, ignoring search.
+    public func count(for filter: Filter) -> Int {
+        guard case .loaded(let catalog) = catalogState else { return 0 }
+        switch filter {
+        case .all: return catalog.fonts.count
+        case .installed: return installed.count
+        case .favorites: return catalog.fonts.filter { favorites.contains($0.id) }.count
+        case .updates: return installed.keys.filter(isUpdateAvailable).count
+        }
+    }
+
     // MARK: Favorites
 
     public func toggleFavorite(_ id: FontFamily.ID) {
@@ -134,11 +187,26 @@ public final class AppModel {
                 didTrimCache = true
                 await fontStore.trim(keeping: catalog.release)
             }
+            // Scan and pick a font before the list appears, so launch never flashes
+            // "0 installed" or an empty detail pane.
+            await refreshInstalled(in: catalog)
+            selectInitialFont(in: catalog)
             catalogState = .loaded(catalog)
-            await refreshInstalled()
         } catch {
             catalogState = .failed
         }
+    }
+
+    /// The last font you looked at, or else a favorite, an installed font, or the first one.
+    /// Never leaves the window on an empty "nothing selected" screen at launch.
+    private func selectInitialFont(in catalog: Catalog) {
+        guard selection == nil || !catalog.fonts.contains(where: { $0.id == selection }) else { return }
+        let ids = catalog.fonts.map(\.id)
+        let remembered = defaults.string(forKey: Self.selectionKey).flatMap { ids.contains($0) ? $0 : nil }
+        selection = remembered
+            ?? ids.first(where: favorites.contains)
+            ?? ids.first { installed[$0] != nil }
+            ?? ids.first
     }
 
     // MARK: Install
@@ -146,12 +214,34 @@ public final class AppModel {
     /// Re-reads the Fonts folders. Cheap enough to run whenever the app becomes active.
     public func refreshInstalled() async {
         guard case .loaded(let catalog) = catalogState else { return }
+        await refreshInstalled(in: catalog)
+    }
+
+    private func refreshInstalled(in catalog: Catalog) async {
         let token = UUID()
         scanToken = token
         let result = await library.scan(catalog: catalog.fonts)
+        let faces = await Self.sidebarFaces(for: result, catalog: catalog)
         // A newer scan started meanwhile; its snapshot is fresher than ours.
         guard scanToken == token else { return }
         installed = result
+        installedFaces = faces
+    }
+
+    /// One face per installed family for its sidebar row: the main typeface's Standard variant
+    /// when there is one, else any installed face. Reads font files, so it runs off the main actor.
+    nonisolated static func sidebarFaces(
+        for installed: [FontFamily.ID: Installation], catalog: Catalog
+    ) async -> [FontFamily.ID: FontFace] {
+        var faces: [FontFamily.ID: FontFace] = [:]
+        for (id, installation) in installed {
+            let candidates = FontStore.faces(choosingFrom: installation.files)
+            let main = catalog.fonts.first { $0.id == id }?.patchedName
+            faces[id] = candidates.first { $0.baseName == main && $0.variant == .standard }
+                ?? candidates.first { $0.variant == .standard }
+                ?? candidates.first
+        }
+        return faces
     }
 
     /// Release tag without the "v", e.g. "3.5.1".
@@ -238,6 +328,7 @@ public final class AppModel {
             let faces = FontStore.faces(choosingFrom: installation.files)
             if !faces.isEmpty {
                 preview = .loaded(faces)
+                previewFontID = font.id
                 return
             }
         }
@@ -253,6 +344,7 @@ public final class AppModel {
             }
             guard previewToken == token else { return }
             preview = faces.isEmpty ? .failed : .loaded(faces)
+            previewFontID = font.id
         } catch {
             guard previewToken == token else { return }
             preview = .failed
@@ -287,6 +379,11 @@ public final class AppModel {
     public var shownVariant: FontFace.Variant {
         get { previewFace?.variant ?? variant }
         set { variant = newValue }
+    }
+
+    /// `previewFace`, but only once it belongs to the selected font, e.g. for drawing its title.
+    public var selectedPreviewFace: FontFace? {
+        previewFontID == selectedFont?.id ? previewFace : nil
     }
 
     /// The face to render: the chosen typeface and variant, falling back to any variant of that typeface.

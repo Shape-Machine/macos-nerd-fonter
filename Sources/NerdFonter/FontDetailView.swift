@@ -7,54 +7,77 @@ struct FontDetailView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Text(font.name).font(.largeTitle.weight(.semibold))
-                        FavoriteButton(id: font.id, model: model)
-                        if let name = model.installedFamilyName {
-                            CopyNameButton(name: name)
-                                .padding(.leading, 4)
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                header
+                switch model.preview {
+                case .loading(let progress):
+                    LoadingView(fontName: font.name, progress: progress)
+                        .frame(maxWidth: .infinity, minHeight: 240)
+                case .failed:
+                    ContentUnavailableView {
+                        Label("Couldn't Load Preview", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text("Check your connection and try again.")
+                    } actions: {
+                        Button("Try Again") { Task { await model.loadPreview() } }
                     }
-                    Text(font.description).foregroundStyle(.secondary)
-                    Text(details).font(.callout).foregroundStyle(.tertiary)
-                }
-                Spacer()
-                InstallButton(font: font, model: model)
-            }
-
-            switch model.preview {
-            case .loading(let progress):
-                LoadingView(fontName: font.name, progress: progress)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .failed:
-                ContentUnavailableView {
-                    Label("Couldn't Load Preview", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text("Check your connection and try again.")
-                } actions: {
-                    Button("Try Again") { Task { await model.loadPreview() } }
-                }
-            case .loaded:
-                if let face = model.previewFace {
-                    PreviewView(face: face, model: model)
+                case .loaded:
+                    if let face = model.previewFace {
+                        PreviewView(face: face, model: model)
+                    }
                 }
             }
+            .padding(28)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .navigationTitle(font.name)
+        .scrollBounceBehavior(.basedOnSize)
     }
 
-    /// "OFL-1.1 · v2.304", plus the installed Nerd Fonts release when known.
-    private var details: String {
-        var parts = [font.licenseId, "v\(font.version)"]
-        if let version = model.installed[font.id]?.nerdFontsVersion {
-            parts.append("Installed: Nerd Fonts \(version)")
+    /// A specimen: the name set in the font itself, once its preview has loaded.
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(font.name)
+                        .font(model.selectedPreviewFace.map { Font($0.font(size: 40)) } ?? .system(size: 40, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    FavoriteButton(id: font.id, model: model)
+                }
+                Text(font.description).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Tag(text: font.licenseId)
+                    Tag(text: "v\(font.version)")
+                    if let version = model.installed[font.id]?.nerdFontsVersion {
+                        Tag(text: "Nerd Fonts \(version)", systemImage: "checkmark.circle.fill")
+                    }
+                    if let name = model.installedFamilyName {
+                        CopyNameButton(name: name)
+                    }
+                }
+            }
+            Spacer()
+            InstallButton(font: font, model: model)
         }
-        return parts.joined(separator: " · ")
+    }
+}
+
+private struct Tag: View {
+    let text: String
+    var systemImage: String?
+
+    var body: some View {
+        Label {
+            Text(text)
+        } icon: {
+            if let systemImage { Image(systemName: systemImage) }
+        }
+        .labelStyle(.titleAndIcon)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(.quaternary.opacity(0.6), in: .capsule)
     }
 }
 
@@ -90,13 +113,13 @@ private struct CopyNameButton: View {
             copiedAt = .now
         } label: {
             HStack(spacing: 6) {
-                Text(name).font(.system(.callout, design: .monospaced))
+                Text(name).font(.system(.caption, design: .monospaced).weight(.medium))
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .foregroundStyle(copied ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
                     .contentTransition(.symbolEffect(.replace))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
             .background(.quaternary.opacity(0.6), in: .capsule)
             .contentShape(.capsule)
         }
@@ -207,49 +230,125 @@ private struct PreviewView: View {
                 Image(systemName: "textformat.size.smaller").foregroundStyle(.secondary)
                 Slider(value: $model.previewSize, in: 10...40).frame(width: 140)
                 Image(systemName: "textformat.size.larger").foregroundStyle(.secondary)
+                Text("\(Int(model.previewSize)) pt")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
             }
             .labelsHidden()
 
-            TextEditor(text: $model.previewText)
-                .font(Font(face.font(size: model.previewSize)))
-                .scrollContentBackground(.hidden)
-                .padding(12)
-                .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 12))
-
+            TerminalCard(face: face, model: model)
             GlyphGrid(face: face)
         }
     }
 }
 
-private struct GlyphGrid: View {
+/// The sample as it would look in a terminal: window chrome, a powerline prompt, and editable code.
+private struct TerminalCard: View {
     let face: FontFace
-    @State private var copied: PreviewSample.Glyph.ID?
+    @Bindable var model: AppModel
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 4)], spacing: 4) {
-            ForEach(PreviewSample.glyphs) { glyph in
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(glyph.character, forType: .string)
-                    copied = glyph.id
-                    Task {
-                        try? await Task.sleep(for: .seconds(1))
-                        if copied == glyph.id { copied = nil }
-                    }
-                } label: {
-                    ZStack {
-                        if copied == glyph.id {
-                            Image(systemName: "checkmark").font(.title3).foregroundStyle(.green)
-                        } else {
-                            Text(glyph.character).font(Font(face.font(size: 22)))
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                    .contentShape(.rect)
+        let font = face.font(size: model.previewSize)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                ForEach([Color.red, .yellow, .green], id: \.self) { color in
+                    Circle().fill(color.opacity(0.8)).frame(width: 11, height: 11)
                 }
-                .buttonStyle(.plain)
-                .help("\(glyph.name) — click to copy")
+                Spacer()
+                Text(face.familyName).font(.caption).foregroundStyle(Theme.Terminal.dim)
+                Spacer()
+                Color.clear.frame(width: 47, height: 1)  // balances the dots, keeping the name centred
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.prompt).font(Font(font))
+                TextEditor(text: $model.previewText)
+                    .font(Font(font))
+                    .foregroundStyle(Theme.Terminal.foreground)
+                    .scrollContentBackground(.hidden)
+                    // Sized for the sample's lines; scrolls when long lines wrap in a narrow window.
+                    .frame(height: editorHeight(lineHeight: Self.lineHeight(of: font)))
+                    .padding(.leading, -5)  // TextEditor's own inset; lines up with the prompt
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+        .background(Theme.Terminal.background, in: .rect(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.08)))
+        .environment(\.colorScheme, .dark)  // light caret and selection on the dark card
+    }
+
+    /// Tall enough for every line of the sample, plus one to type into.
+    private func editorHeight(lineHeight: CGFloat) -> CGFloat {
+        let lines = model.previewText.split(separator: "\n", omittingEmptySubsequences: false).count + 1
+        return CGFloat(lines) * lineHeight + 10
+    }
+
+    private static func lineHeight(of font: CTFont) -> CGFloat {
+        ceil(CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font))
+    }
+
+    /// `  ~/code/nerd-fonter   main ` in powerline segments.
+    private static let prompt: AttributedString = {
+        typealias T = Theme.Terminal
+        func run(_ text: String, _ foreground: Color, _ background: Color?) -> AttributedString {
+            var run = AttributedString(text)
+            run.foregroundColor = foreground
+            if let background { run.backgroundColor = background }
+            return run
+        }
+        return run(" \u{F07C} ~/code/nerd-fonter ", T.ink, T.blue)
+            + run("\u{E0B0}", T.blue, T.green)
+            + run(" \u{E0A0} main ", T.ink, T.green)
+            + run("\u{E0B0}", T.green, nil)
+    }()
+}
+
+private struct GlyphGrid: View {
+    let face: FontFace
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 48), spacing: 6)], spacing: 6) {
+            ForEach(PreviewSample.glyphs) { glyph in
+                GlyphTile(glyph: glyph, face: face)
+            }
+        }
+    }
+}
+
+private struct GlyphTile: View {
+    let glyph: PreviewSample.Glyph
+    let face: FontFace
+    @State private var isHovered = false
+    @State private var copiedAt: Date?
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(glyph.character, forType: .string)
+            copiedAt = .now
+        } label: {
+            ZStack {
+                if copiedAt != nil {
+                    Image(systemName: "checkmark").font(.title3).foregroundStyle(.green)
+                } else {
+                    Text(glyph.character).font(Font(face.font(size: 22)))
+                }
+            }
+            .frame(width: 48, height: 48)
+            .background(.quaternary.opacity(isHovered ? 0.9 : 0.35), in: .rect(cornerRadius: 10))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help("\(glyph.name) — click to copy")
+        .task(id: copiedAt) {
+            guard copiedAt != nil else { return }
+            try? await Task.sleep(for: .seconds(1))
+            if !Task.isCancelled { copiedAt = nil }
         }
     }
 }

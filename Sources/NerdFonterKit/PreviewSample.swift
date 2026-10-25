@@ -1,4 +1,4 @@
-/// Default preview content: a prompt, a little code, and popular glyphs.
+/// Default preview content: a little code with easily confused characters, and popular glyphs.
 public enum PreviewSample {
     public struct Glyph: Identifiable, Sendable {
         public let name: String
@@ -12,7 +12,6 @@ public enum PreviewSample {
     }
 
     public static let text = """
-        \u{F07C} ~/code/nerd-fonter \u{E0B0} \u{E0A0} main \u{E0B0}
         func greet(_ name: String) -> String {
             // 0O 1lI |  != -> => <= ===
             return "Hello, \\(name)!"
