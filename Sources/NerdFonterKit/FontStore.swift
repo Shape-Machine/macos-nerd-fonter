@@ -50,7 +50,7 @@ public struct FontStore: Sendable {
     }
 
     /// Cached `.tar.xz` for a family, downloaded once per release.
-    func archive(for font: FontFamily, release: String, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+    public func archive(for font: FontFamily, release: String, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let fm = FileManager.default
         let file = root.appending(path: release).appending(path: "\(font.folderName).tar.xz")
         if fm.fileExists(atPath: file.path) { return file }

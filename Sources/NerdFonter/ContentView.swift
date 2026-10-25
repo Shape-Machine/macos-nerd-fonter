@@ -1,3 +1,4 @@
+import AppKit
 import NerdFonterKit
 import SwiftUI
 
@@ -18,6 +19,13 @@ struct ContentView: View {
         }
         .searchable(text: $model.searchText, placement: .sidebar, prompt: "Search fonts")
         .task { await model.loadCatalog() }
+        // Pick up fonts installed or removed elsewhere (Homebrew, Font Book) while we were in the background.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.refreshInstalled() }
+        }
+        .alert(
+            model.failure ?? "", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })
+        ) {}
     }
 
     @ViewBuilder private var sidebar: some View {
@@ -35,10 +43,35 @@ struct ContentView: View {
             }
         case .loaded:
             List(model.fonts, selection: $model.selection) { font in
-                Text(font.name)
+                HStack {
+                    Text(font.name)
+                    Spacer()
+                    if model.installed[font.id] != nil {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .help("Installed")
+                    }
+                }
+            }
+            .safeAreaInset(edge: .top) {
+                Picker("Show", selection: $model.filter) {
+                    ForEach(AppModel.Filter.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
             }
             .overlay {
-                if model.fonts.isEmpty { ContentUnavailableView.search(text: model.searchText) }
+                if model.fonts.isEmpty {
+                    if !model.searchText.isEmpty {
+                        ContentUnavailableView.search(text: model.searchText)
+                    } else {
+                        ContentUnavailableView(
+                            "No Fonts Installed", systemImage: "textformat",
+                            description: Text("Fonts you install appear here."))
+                    }
+                }
             }
         }
     }

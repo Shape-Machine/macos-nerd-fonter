@@ -8,11 +8,15 @@ struct FontDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(font.name).font(.largeTitle.weight(.semibold))
-                Text(font.description).foregroundStyle(.secondary)
-                Text("\(font.licenseId) · v\(font.version)")
-                    .font(.callout).foregroundStyle(.tertiary)
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(font.name).font(.largeTitle.weight(.semibold))
+                    Text(font.description).foregroundStyle(.secondary)
+                    Text("\(font.licenseId) · v\(font.version)")
+                        .font(.callout).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                InstallButton(font: font, model: model)
             }
 
             switch model.preview {
@@ -36,6 +40,43 @@ struct FontDetailView: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(font.name)
+    }
+}
+
+/// Install, Uninstall, or progress, depending on the family's state.
+private struct InstallButton: View {
+    let font: FontFamily
+    let model: AppModel
+
+    var body: some View {
+        Group {
+            switch model.operations[font.id] {
+            case .installing(let progress?) where progress < 1:
+                ProgressView(value: progress) { Text("Downloading…") }
+                    .frame(width: 120)
+            case .installing:
+                ProgressView { Text("Installing…") }.controlSize(.small)
+            case .uninstalling:
+                ProgressView { Text("Uninstalling…") }.controlSize(.small)
+            case nil:
+                if let installation = model.installed[font.id] {
+                    if installation.isSystemWide {
+                        Label("Installed for All Users", systemImage: "lock.fill")
+                            .foregroundStyle(.secondary)
+                            .help("Installed in /Library/Fonts. Remove it in Finder or Font Book.")
+                    } else {
+                        Button("Uninstall") { Task { await model.uninstall(font) } }
+                            .help("Move this family's \(installation.files.count) files to the Trash")
+                    }
+                } else {
+                    Button("Install") { Task { await model.install(font) } }
+                        .buttonStyle(.borderedProminent)
+                        .help("Install all variants for your user account")
+                }
+            }
+        }
+        .controlSize(.large)
+        .font(.callout)
     }
 }
 
