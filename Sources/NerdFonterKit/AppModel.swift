@@ -120,6 +120,51 @@ public final class AppModel {
         if selectedFont != nil { await loadPreview() }
     }
 
+    // MARK: Sidebar
+
+    public struct FontSection: Identifiable, Equatable {
+        /// Nil for a plain, untitled list.
+        public let title: String?
+        public let fonts: [FontFamily]
+        public var id: String { title ?? "" }
+    }
+
+    /// The sidebar list. Browsing everything: your installed fonts first, then the rest under
+    /// A–Z letters. Searching or filtering: one plain list, since it's short or already focused.
+    public var sections: [FontSection] {
+        let fonts = self.fonts
+        guard filter == .all, searchText.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return [FontSection(title: nil, fonts: fonts)]
+        }
+        let mine = fonts.filter { installed[$0.id] != nil }
+        var sections = mine.isEmpty ? [] : [FontSection(title: "Installed", fonts: mine)]
+        var letter: String?
+        var group: [FontFamily] = []
+        for font in fonts where installed[font.id] == nil {
+            let first = font.name.prefix(1).uppercased()
+            let key = first.first?.isLetter == true ? first : "#"
+            if key != letter, let letter {
+                sections.append(FontSection(title: letter, fonts: group))
+                group = []
+            }
+            letter = key
+            group.append(font)
+        }
+        if let letter { sections.append(FontSection(title: letter, fonts: group)) }
+        return sections
+    }
+
+    /// How many fonts each filter shows, ignoring search.
+    public func count(for filter: Filter) -> Int {
+        guard case .loaded(let catalog) = catalogState else { return 0 }
+        switch filter {
+        case .all: return catalog.fonts.count
+        case .installed: return installed.count
+        case .favorites: return catalog.fonts.filter { favorites.contains($0.id) }.count
+        case .updates: return installed.keys.filter(isUpdateAvailable).count
+        }
+    }
+
     // MARK: Favorites
 
     public func toggleFavorite(_ id: FontFamily.ID) {

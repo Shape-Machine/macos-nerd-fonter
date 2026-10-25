@@ -48,59 +48,114 @@ struct ContentView: View {
                 Button("Try Again") { Task { await model.loadCatalog() } }
             }
         case .loaded:
-            List(model.fonts, selection: $model.selection) { font in
-                HStack(spacing: 6) {
-                    // Installed fonts show their name in their own face; the rest stay in the system font.
-                    if let face = model.installedFaces[font.id] {
-                        Text(font.name).font(Font(face.font(size: NSFont.systemFontSize)))
-                    } else {
-                        Text(font.name)
+            // Library rows are part of the list, so fonts can never scroll underneath them.
+            List(selection: $model.selection) {
+                Section {
+                    ForEach(AppModel.Filter.allCases) { LibraryRow(filter: $0, model: model) }
+                }
+                if model.fonts.isEmpty {
+                    Group {
+                        if !model.searchText.isEmpty {
+                            ContentUnavailableView.search(text: model.searchText)
+                        } else {
+                            model.filter.emptyState
+                        }
                     }
-                    Spacer()
-                    if model.favorites.contains(font.id) {
-                        Image(systemName: "star.fill").foregroundStyle(.yellow).imageScale(.small)
-                    }
-                    if model.isUpdateAvailable(font.id) {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .foregroundStyle(.tint)
-                            .help("Update available")
-                    } else if model.installed[font.id] != nil {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                            .help("Installed")
+                    .padding(.top, 24)
+                } else {
+                    ForEach(model.sections) { section in
+                        if let title = section.title {
+                            Section(title) { rows(section.fonts) }
+                        } else {
+                            Section { rows(section.fonts) }
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    private func rows(_ fonts: [FontFamily]) -> some View {
+        ForEach(fonts) { font in
+            FontRow(font: font, model: model)
                 .contextMenu {
                     Button(model.favorites.contains(font.id) ? "Remove from Favorites" : "Add to Favorites") {
                         model.toggleFavorite(font.id)
                     }
                 }
+        }
+    }
+}
+
+/// One of All / Installed / Favorites / Updates, with its count, like a mailbox in Mail.
+/// Not a selectable list row (the list selects fonts); a button styled to match the sidebar.
+private struct LibraryRow: View {
+    let filter: AppModel.Filter
+    let model: AppModel
+
+    var body: some View {
+        let isSelected = model.filter == filter
+        Button { model.filter = filter } label: {
+            HStack(spacing: 8) {
+                Image(systemName: filter.systemImage)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.tint))
+                    .frame(width: 18)
+                Text(filter.title)
+                Spacer()
+                Text("\(model.count(for: filter))")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
             }
-            .safeAreaInset(edge: .top) {
-                Picker("Show", selection: $model.filter) {
-                    ForEach(AppModel.Filter.allCases) { filter in
-                        Image(systemName: filter.systemImage)
-                            .accessibilityLabel(filter.rawValue)
-                            .help(filter.rawValue)
-                            .tag(filter)
-                    }
+            .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 7))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0))
+    }
+}
+
+/// Name (in its own face when installed) over a quiet line of what matters about it.
+private struct FontRow: View {
+    let font: FontFamily
+    let model: AppModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                if let face = model.installedFaces[font.id] {
+                    Text(font.name).font(Font(face.font(size: NSFont.systemFontSize)))
+                } else {
+                    Text(font.name)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 6)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .overlay {
-                if model.fonts.isEmpty {
-                    if !model.searchText.isEmpty {
-                        ContentUnavailableView.search(text: model.searchText)
-                    } else {
-                        model.filter.emptyState
-                    }
-                }
+            .lineLimit(1)
+            Spacer()
+            if model.favorites.contains(font.id) {
+                Image(systemName: "star.fill").foregroundStyle(.yellow).imageScale(.small)
+            }
+            if model.isUpdateAvailable(font.id) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundStyle(.tint)
+                    .help("Update available")
             }
         }
+        .padding(.vertical, 2)
+    }
+
+    private var subtitle: String {
+        if let installation = model.installed[font.id] {
+            if model.isUpdateAvailable(font.id), let current = installation.nerdFontsVersion {
+                return "Update · \(current) → \(model.latestVersion ?? "")"
+            }
+            return installation.isSystemWide ? "Installed for all users" : "Installed"
+        }
+        return "\(font.isMonospaced ? "Mono" : "Proportional") · \(font.licenseId)"
     }
 }
 
@@ -115,9 +170,11 @@ extension ContentView {
 }
 
 extension AppModel.Filter {
+    var title: String { self == .all ? "All Fonts" : rawValue }
+
     var systemImage: String {
         switch self {
-        case .all: "square.grid.2x2"
+        case .all: "textformat"
         case .installed: "checkmark.circle"
         case .favorites: "star"
         case .updates: "arrow.down.circle"

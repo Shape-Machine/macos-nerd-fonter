@@ -262,6 +262,34 @@ struct AppModelTests {
         #expect(model.selectedPreviewFace == nil)
     }
 
+    // MARK: Sidebar
+
+    @Test func sectionsPutInstalledFirstThenLetters() async throws {
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["SauceCodeProNerdFont-Regular@3.3.0.ttf"])
+        let model = await loadedModel(library: library)
+
+        #expect(model.sections.map(\.title) == ["Installed", "A", "J"])
+        #expect(model.sections.map { $0.fonts.map(\.id) } == [["SourceCodePro"], ["Arimo"], ["JetBrainsMono"]])
+
+        model.searchText = "o"
+        #expect(model.sections.map(\.title) == [nil])
+        model.searchText = ""
+        model.filter = .installed
+        #expect(model.sections == [.init(title: nil, fonts: model.fonts)])
+    }
+
+    @Test func countsPerFilter() async throws {
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["SauceCodeProNerdFont-Regular@3.3.0.ttf", "ArimoNerdFont-Regular.ttf"])
+        let model = await loadedModel(library: library)
+        model.toggleFavorite("JetBrainsMono")
+        #expect(model.count(for: .all) == 3)
+        #expect(model.count(for: .installed) == 2)
+        #expect(model.count(for: .favorites) == 1)
+        #expect(model.count(for: .updates) == 1)
+    }
+
     // MARK: Cache
 
     @Test func clearCacheWaitsForPreviewsOfFontsNoLongerSelected() async throws {
