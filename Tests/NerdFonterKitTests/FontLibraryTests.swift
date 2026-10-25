@@ -92,6 +92,33 @@ struct FontLibraryTests {
         #expect(try Data(contentsOf: library.userFonts.appending(path: "TestNerdFont-A.ttf")).isEmpty)
     }
 
+    @Test func familyMatchingNeedsEvidence() {
+        // Release-named files may extend the family name freely.
+        #expect(FontLibrary.belongs("GohuFont11", to: "GohuFont", isReleaseNamed: true))
+        #expect(FontLibrary.belongs("JetBrainsMonoNL", to: "JetBrainsMono", isReleaseNamed: true))
+        // Other files only by a short typeface code.
+        #expect(FontLibrary.belongs("MesloLGS", to: "MesloLG", isReleaseNamed: false))
+        #expect(FontLibrary.belongs("Hack", to: "Hack", isReleaseNamed: false))
+        #expect(!FontLibrary.belongs("HackGen Console", to: "Hack", isReleaseNamed: false))
+        #expect(!FontLibrary.belongs("HackGen35", to: "Hack", isReleaseNamed: false))
+        #expect(!FontLibrary.belongs("Arimo", to: "Hack", isReleaseNamed: true))
+    }
+
+    @Test func otherFontsSharingAPrefixAreNotClaimed() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let families = [
+            "HackNerdFont-Regular.ttf": "Hack Nerd Font",
+            "HackGenConsoleNF-Regular.ttf": "HackGen Console NF",
+        ]
+        let library = FontLibrary(
+            userFonts: root.appending(path: "User"), systemFonts: root.appending(path: "System"),
+            readMetadata: { url in families[url.lastPathComponent].map { .init(familyName: $0, version: nil) } })
+        try Fixtures.touch(library.userFonts, Array(families.keys))
+
+        let installed = await library.scan(catalog: [Self.family("Hack")])
+        #expect(installed["Hack"]?.files.map(\.lastPathComponent) == ["HackNerdFont-Regular.ttf"])
+    }
+
     @Test func installDiscardsBrokenArchive() async throws {
         let library = Fixtures.library()
         let broken = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).tar.xz")

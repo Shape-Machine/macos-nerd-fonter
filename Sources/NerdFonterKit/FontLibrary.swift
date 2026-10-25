@@ -47,9 +47,12 @@ public struct FontLibrary: Sendable {
         var result: [FontFamily.ID: Installation] = [:]
         for (dir, isSystemWide) in [(userFonts, false), (systemFonts, true)] {
             for file in Self.fontFiles(in: dir) where Self.mightBeNerdFont(file) {
+                let isReleaseNamed = FontFace.parse(fileName: file.lastPathComponent) != nil
                 guard let metadata = readMetadata(file),
                       let base = Self.baseName(fromFamilyName: metadata.familyName),
-                      let family = families.first(where: { base.hasPrefix($0.patchedName) })
+                      let family = families.first(where: {
+                          Self.belongs(base, to: $0.patchedName, isReleaseNamed: isReleaseNamed)
+                      })
                 else { continue }
                 var installation = result[family.id] ?? Installation(files: [], isSystemWide: false)
                 installation.files.append(file)
@@ -63,6 +66,18 @@ public struct FontLibrary: Sendable {
             }
         }
         return result
+    }
+
+    /// Whether a font whose family base is `base` belongs to the catalog family `patchedName`.
+    ///
+    /// Typefaces extend the family name (JetBrainsMonoNL, MesloLGS, GohuFont11). Official release file
+    /// names are strong evidence, so any extension is fine for them. Other files only get short
+    /// typeface codes, so Powerlevel10k's "MesloLGS NF" counts as Meslo but a different font that merely
+    /// shares a prefix ("HackGen Console NF") doesn't count as Hack — and can't be trashed with it.
+    static func belongs(_ base: String, to patchedName: String, isReleaseNamed: Bool) -> Bool {
+        guard base.hasPrefix(patchedName) else { return false }
+        let rest = base.dropFirst(patchedName.count)
+        return isReleaseNamed || rest.isEmpty || rest.wholeMatch(of: /[A-Z0-9]{1,3}/) != nil
     }
 
     /// Cheap file-name check, so we only read the name table of likely candidates. Covers release

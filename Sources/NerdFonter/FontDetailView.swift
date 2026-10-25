@@ -10,10 +10,12 @@ struct FontDetailView: View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(font.name).font(.largeTitle.weight(.semibold))
+                    HStack(spacing: 8) {
+                        Text(font.name).font(.largeTitle.weight(.semibold))
+                        FavoriteButton(id: font.id, model: model)
+                    }
                     Text(font.description).foregroundStyle(.secondary)
-                    Text("\(font.licenseId) · v\(font.version)")
-                        .font(.callout).foregroundStyle(.tertiary)
+                    Text(details).font(.callout).foregroundStyle(.tertiary)
                 }
                 Spacer()
                 InstallButton(font: font, model: model)
@@ -41,9 +43,34 @@ struct FontDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(font.name)
     }
+
+    /// "OFL-1.1 · v2.304", plus the installed Nerd Fonts release when known.
+    private var details: String {
+        var parts = [font.licenseId, "v\(font.version)"]
+        if let version = model.installed[font.id]?.nerdFontsVersion {
+            parts.append("Installed: Nerd Fonts \(version)")
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
-/// Install, Uninstall, or progress, depending on the family's state.
+struct FavoriteButton: View {
+    let id: FontFamily.ID
+    let model: AppModel
+
+    var body: some View {
+        let isFavorite = model.favorites.contains(id)
+        Button { model.toggleFavorite(id) } label: {
+            Image(systemName: isFavorite ? "star.fill" : "star")
+                .foregroundStyle(isFavorite ? AnyShapeStyle(.yellow) : AnyShapeStyle(.tertiary))
+                .font(.title2)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.plain)
+        .help(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+    }
+}
+
 private struct InstallButton: View {
     let font: FontFamily
     let model: AppModel
@@ -51,11 +78,13 @@ private struct InstallButton: View {
     var body: some View {
         Group {
             switch model.operations[font.id] {
-            case .installing(let progress?) where progress < 1:
+            case .installing(let progress?) where progress < 1, .updating(let progress?) where progress < 1:
                 ProgressView(value: progress) { Text("Downloading…") }
                     .frame(width: 120)
             case .installing:
                 ProgressView { Text("Installing…") }.controlSize(.small)
+            case .updating:
+                ProgressView { Text("Updating…") }.controlSize(.small)
             case .uninstalling:
                 ProgressView { Text("Uninstalling…") }.controlSize(.small)
             case nil:
@@ -65,8 +94,15 @@ private struct InstallButton: View {
                             .foregroundStyle(.secondary)
                             .help("Installed in /Library/Fonts. Remove it in Finder or Font Book.")
                     } else {
-                        Button("Uninstall") { Task { await model.uninstall(font) } }
-                            .help("Move this family's \(installation.files.count) files to the Trash")
+                        HStack {
+                            Button("Uninstall") { Task { await model.uninstall(font) } }
+                                .help("Move this family's \(installation.files.count) files to the Trash")
+                            if model.isUpdateAvailable(font.id) {
+                                Button("Update") { Task { await model.update(font) } }
+                                    .buttonStyle(.borderedProminent)
+                                    .help("Nerd Fonts \(installation.nerdFontsVersion ?? "") → \(model.latestVersion ?? "")")
+                            }
+                        }
                     }
                 } else {
                     Button("Install") { Task { await model.install(font) } }
