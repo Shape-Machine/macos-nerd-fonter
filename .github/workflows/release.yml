@@ -5,10 +5,12 @@ name: Build
 on:
   pull_request:
   push:
-    tags: ["v*"]
+    # Plain numeric versions only: Apple requires numeric bundle versions.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 
+# Read-only by default; only the release job, which runs no repository code, can write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -21,19 +23,36 @@ jobs:
 
       - name: Build app
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION=0.0.0; fi
+          VERSION=0.0.0
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Tag $GITHUB_REF_NAME isn't a numeric version like v1.2.3"
+              exit 1
+            fi
+          fi
           VERSION="$VERSION" UNIVERSAL=1 ./scripts/build-app.sh
           ditto -c -k --keepParent build/NerdFonter.app NerdFonter.zip
 
-      - name: Keep the build for pull requests
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: NerdFonter
           path: NerdFonter.zip
 
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NerdFonter
+
       - name: Publish release
-        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" NerdFonter.zip --title "Nerd Fonter $GITHUB_REF_NAME" --generate-notes
+        run: >
+          gh release create "$GITHUB_REF_NAME" NerdFonter.zip
+          --repo "$GITHUB_REPOSITORY" --title "Nerd Fonter $GITHUB_REF_NAME" --generate-notes
