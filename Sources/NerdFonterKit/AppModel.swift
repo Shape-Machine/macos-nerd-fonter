@@ -51,6 +51,8 @@ public final class AppModel {
     private let library: FontLibrary
     /// Identifies the latest preview load so slower, older loads can't overwrite it.
     private var previewToken = UUID()
+    /// Same, for scans of the Fonts folders.
+    private var scanToken = UUID()
 
     public init(store: CatalogStore = .live, fontStore: FontStore = .live, library: FontLibrary = .live) {
         self.store = store
@@ -91,7 +93,12 @@ public final class AppModel {
     /// Re-reads the Fonts folders. Cheap enough to run whenever the app becomes active.
     public func refreshInstalled() async {
         guard case .loaded(let catalog) = catalogState else { return }
-        installed = await library.scan(catalog: catalog.fonts)
+        let token = UUID()
+        scanToken = token
+        let result = await library.scan(catalog: catalog.fonts)
+        // A newer scan started meanwhile; its snapshot is fresher than ours.
+        guard scanToken == token else { return }
+        installed = result
     }
 
     public func install(_ font: FontFamily) async {

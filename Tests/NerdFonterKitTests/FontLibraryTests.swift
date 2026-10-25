@@ -54,6 +54,35 @@ struct FontLibraryTests {
         #expect(try Data(contentsOf: library.userFonts.appending(path: "TestNerdFont-Regular.ttf")).count > 0)
     }
 
+    @Test func fileNameFilterCoversNFBuilds() {
+        #expect(FontLibrary.mightBeNerdFont(URL(filePath: "/f/JetBrainsMonoNerdFont-Regular.ttf")))
+        #expect(FontLibrary.mightBeNerdFont(URL(filePath: "/f/MesloLGS NF Regular.ttf")))
+        #expect(FontLibrary.mightBeNerdFont(URL(filePath: "/f/Hack NFM Bold.ttf")))
+        #expect(!FontLibrary.mightBeNerdFont(URL(filePath: "/f/Hack-Regular.ttf")))
+        #expect(!FontLibrary.mightBeNerdFont(URL(filePath: "/f/NFL Sans.ttf")))
+    }
+
+    @Test func detectsPowerlevel10kMeslo() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let library = FontLibrary(
+            userFonts: root.appending(path: "User"), systemFonts: root.appending(path: "System"),
+            readMetadata: { _ in .init(familyName: "MesloLGS NF", version: "Version 2.1.0") })
+        try Fixtures.touch(library.userFonts, ["MesloLGS NF Regular.ttf", "MesloLGS NF Bold.ttf"])
+
+        let installed = await library.scan(catalog: [Self.family("MesloLG", folder: "Meslo")])
+        #expect(installed["Meslo"]?.files.count == 2)
+        #expect(installed["Meslo"]?.nerdFontsVersion == nil)
+    }
+
+    @Test func installDiscardsBrokenArchive() async throws {
+        let library = Fixtures.library()
+        let broken = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).tar.xz")
+        try Data("not an archive".utf8).write(to: broken)
+
+        await #expect(throws: (any Error).self) { try await library.install(archive: broken) }
+        #expect(!FileManager.default.fileExists(atPath: broken.path))
+    }
+
     @Test func uninstallRefusesSystemWide() async throws {
         let library = Fixtures.library()
         let installation = Installation(files: [], isSystemWide: true)

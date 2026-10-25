@@ -46,7 +46,7 @@ public struct FontLibrary: Sendable {
         let families = catalog.sorted { $0.patchedName.count > $1.patchedName.count }
         var result: [FontFamily.ID: Installation] = [:]
         for (dir, isSystemWide) in [(userFonts, false), (systemFonts, true)] {
-            for file in Self.fontFiles(in: dir) where file.lastPathComponent.localizedCaseInsensitiveContains("nerd") {
+            for file in Self.fontFiles(in: dir) where Self.mightBeNerdFont(file) {
                 guard let metadata = readMetadata(file),
                       let base = Self.baseName(fromFamilyName: metadata.familyName),
                       let family = families.first(where: { base.hasPrefix($0.patchedName) })
@@ -63,6 +63,13 @@ public struct FontLibrary: Sendable {
             }
         }
         return result
+    }
+
+    /// Cheap file-name check, so we only read the name table of likely candidates. Covers release
+    /// names ("…NerdFont…") and "NF" builds such as Powerlevel10k's "MesloLGS NF Regular.ttf".
+    static func mightBeNerdFont(_ file: URL) -> Bool {
+        let name = file.deletingPathExtension().lastPathComponent
+        return name.localizedCaseInsensitiveContains("nerd") || name.contains(/\bNF[MP]?\b/)
     }
 
     /// "JetBrainsMonoNL Nerd Font Propo" → "JetBrainsMonoNL". Long names use "NF", "NFM", "NFP".
@@ -99,15 +106,26 @@ public struct FontLibrary: Sendable {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: staging) }
 
-        try await FontStore.tar(["-xJf", archive.path, "-C", staging.path])
-        let fonts = Self.fontFiles(in: staging)
-        guard !fonts.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        let fonts: [URL]
+        do {
+            try await FontStore.tar(["-xJf", archive.path, "-C", staging.path])
+            fonts = Self.fontFiles(in: staging)
+            guard !fonts.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        } catch {
+            // Don't let a broken download stick around and defeat retries.
+            try? fm.removeItem(at: archive)
+            throw error
+        }
 
         try fm.createDirectory(at: userFonts, withIntermediateDirectories: true)
         return try fonts.map { font in
             let destination = userFonts.appending(path: font.lastPathComponent)
-            if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
-            try fm.moveItem(at: font, to: destination)
+            if fm.fileExists(atPath: destination.path) {
+                // Swaps in one step, so a failure never leaves the old file deleted.
+                _ = try fm.replaceItemAt(destination, withItemAt: font)
+            } else {
+                try fm.moveItem(at: font, to: destination)
+            }
             return destination
         }
     }
