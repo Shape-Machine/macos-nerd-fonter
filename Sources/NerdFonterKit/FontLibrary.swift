@@ -117,17 +117,31 @@ public struct FontLibrary: Sendable {
             throw error
         }
 
+        // All or nothing: existing files are set aside, and restored if any move fails,
+        // so a failed install never leaves the family deleted or half replaced.
+        let backups = staging.appending(path: ".backups")
+        try fm.createDirectory(at: backups, withIntermediateDirectories: true)
         try fm.createDirectory(at: userFonts, withIntermediateDirectories: true)
-        return try fonts.map { font in
-            let destination = userFonts.appending(path: font.lastPathComponent)
-            if fm.fileExists(atPath: destination.path) {
-                // Swaps in one step, so a failure never leaves the old file deleted.
-                _ = try fm.replaceItemAt(destination, withItemAt: font)
-            } else {
+        var moved: [(destination: URL, backup: URL?)] = []
+        do {
+            for font in fonts {
+                let destination = userFonts.appending(path: font.lastPathComponent)
+                var backup: URL?
+                if fm.fileExists(atPath: destination.path) {
+                    backup = backups.appending(path: font.lastPathComponent)
+                    try fm.moveItem(at: destination, to: backup!)
+                }
+                moved.append((destination, backup))
                 try fm.moveItem(at: font, to: destination)
             }
-            return destination
+        } catch {
+            for (destination, backup) in moved.reversed() {
+                try? fm.removeItem(at: destination)
+                if let backup { try? fm.moveItem(at: backup, to: destination) }
+            }
+            throw error
         }
+        return moved.map(\.destination)
     }
 
     /// Moves the family's files to the Trash. System-wide installs are left alone.

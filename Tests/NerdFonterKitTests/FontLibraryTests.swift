@@ -74,6 +74,24 @@ struct FontLibraryTests {
         #expect(installed["Meslo"]?.nerdFontsVersion == nil)
     }
 
+    @Test func failedInstallRestoresExistingFiles() async throws {
+        let fm = FileManager.default
+        let library = Fixtures.library()
+        try Fixtures.touch(library.userFonts, ["TestNerdFont-A.ttf", "TestNerdFont-B.ttf"])
+        // A locked file can't be moved, so the install fails on B after replacing A.
+        let locked = library.userFonts.appending(path: "TestNerdFont-B.ttf")
+        try fm.setAttributes([.immutable: true], ofItemAtPath: locked.path)
+        defer { try? fm.setAttributes([.immutable: false], ofItemAtPath: locked.path) }
+        let archive = try FontStoreTests.makeArchive(["TestNerdFont-A.ttf", "TestNerdFont-B.ttf", "TestNerdFont-C.ttf"])
+
+        await #expect(throws: (any Error).self) { try await library.install(archive: archive) }
+
+        let contents = try fm.contentsOfDirectory(atPath: library.userFonts.path).sorted()
+        #expect(contents == ["TestNerdFont-A.ttf", "TestNerdFont-B.ttf"])
+        // A is the original (empty) file again, not the archive's copy.
+        #expect(try Data(contentsOf: library.userFonts.appending(path: "TestNerdFont-A.ttf")).isEmpty)
+    }
+
     @Test func installDiscardsBrokenArchive() async throws {
         let library = Fixtures.library()
         let broken = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).tar.xz")
