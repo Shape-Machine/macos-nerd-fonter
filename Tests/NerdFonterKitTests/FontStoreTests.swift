@@ -107,6 +107,45 @@ struct FontStoreTests {
         #expect(b.count == 1)
     }
 
+    @Test func trimDropsOtherReleasesLeftoversAndLeastRecentlyUsed() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appending(path: UUID().uuidString)
+        let current = root.appending(path: "v2")
+        func write(_ path: String, bytes: Int, age: TimeInterval) throws {
+            let url = root.appending(path: path)
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(count: bytes).write(to: url)
+            // Writing bumps the folder's date too, so age both.
+            for item in [url, url.deletingLastPathComponent()] {
+                try fm.setAttributes([.modificationDate: Date() - age], ofItemAtPath: item.path)
+            }
+        }
+        try write("v1/Old.tar.xz", bytes: 10, age: 0)
+        try write(".staging-x/A-Regular.ttf", bytes: 10, age: 0)
+        try write("v2/.install-x/A-Regular.ttf", bytes: 10, age: 0)
+        try write("v2/Recent.tar.xz", bytes: 200_000, age: 10)
+        try write("v2/Recent/R-Regular.ttf", bytes: 200_000, age: 10)
+        try write("v2/Stale.tar.xz", bytes: 200_000, age: 1000)
+        try write("v2/Stale/S-Regular.ttf", bytes: 200_000, age: 1000)
+
+        await FontStore(root: root) { _, _ in throw URLError(.unknown) }.trim(keeping: "v2", limit: 500_000)
+
+        #expect(try fm.contentsOfDirectory(atPath: root.path) == ["v2"])
+        #expect(try fm.contentsOfDirectory(atPath: current.path).sorted() == ["Recent", "Recent.tar.xz"])
+    }
+
+    @Test func cacheHitsCountAsRecentUse() async throws {
+        let archive = try Self.makeArchive(["TestNerdFont-Regular.ttf"])
+        let store = Self.store(serving: archive, counter: Counter())
+        _ = try await store.previewFaces(for: font, release: "v1", progress: { _ in })
+        let dir = store.root.appending(path: "v1/Test")
+        try FileManager.default.setAttributes([.modificationDate: Date.distantPast], ofItemAtPath: dir.path)
+
+        _ = try await store.previewFaces(for: font, release: "v1", progress: { _ in })
+        let used = try dir.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        #expect(try #require(used) > Date() - 60)
+    }
+
     // MARK: Helpers
 
     final class Counter: @unchecked Sendable {

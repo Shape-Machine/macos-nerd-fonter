@@ -32,6 +32,7 @@
 - `make run` — build `build/NerdFonter.app` and open it
 - `make test` — run tests
 - `make clean` — remove build output
+- `swift scripts/make-icon.swift` — regenerate `Resources/AppIcon.icns`
 
 ## Layout
 

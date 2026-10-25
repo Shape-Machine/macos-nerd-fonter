@@ -28,7 +28,10 @@ public struct FontStore: Sendable {
     ) async throws -> [FontFace] {
         let fm = FileManager.default
         let dir = root.appending(path: release).appending(path: font.folderName)
-        if fm.fileExists(atPath: dir.path) { return Self.faces(in: dir) }
+        if fm.fileExists(atPath: dir.path) {
+            Self.markUsed(dir)
+            return Self.faces(in: dir)
+        }
 
         let archive = try await archive(for: font, release: release, progress: progress)
         let staging = root.appending(path: ".staging-\(UUID().uuidString)")
@@ -53,13 +56,77 @@ public struct FontStore: Sendable {
     public func archive(for font: FontFamily, release: String, progress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let fm = FileManager.default
         let file = root.appending(path: release).appending(path: "\(font.folderName).tar.xz")
-        if fm.fileExists(atPath: file.path) { return file }
+        if fm.fileExists(atPath: file.path) {
+            Self.markUsed(file)
+            return file
+        }
 
         let temp = try await download(Self.archiveURL(release: release, folderName: font.folderName), progress)
         defer { try? fm.removeItem(at: temp) }
         try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Self.moveIfAbsent(temp, to: file)
         return file
+    }
+
+    // MARK: Cache size
+
+    /// Default cap for the download cache.
+    public static let cacheLimit = 250_000_000
+
+    /// Drops other releases and leftovers from interrupted work, then the least recently used
+    /// families until the cache fits in `limit` bytes. Meant for launch, when nothing is in flight.
+    public func trim(keeping release: String, limit: Int = cacheLimit) async {
+        let fm = FileManager.default
+        for entry in Self.contents(of: root) where entry.lastPathComponent != release {
+            try? fm.removeItem(at: entry)
+        }
+        // A family is its archive plus its preview folder; they're evicted together.
+        let releaseDir = root.appending(path: release)
+        var families: [String: (entries: [URL], size: Int, lastUsed: Date)] = [:]
+        for entry in Self.contents(of: releaseDir) {
+            let name = entry.lastPathComponent
+            if name.hasPrefix(".") {
+                try? fm.removeItem(at: entry)
+                continue
+            }
+            let family = name.hasSuffix(".tar.xz") ? String(name.dropLast(".tar.xz".count)) : name
+            let used = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            var item = families[family] ?? ([], 0, .distantPast)
+            item.entries.append(entry)
+            item.size += Self.allocatedSize(of: entry)
+            item.lastUsed = max(item.lastUsed, used)
+            families[family] = item
+        }
+        var total = 0
+        for item in families.values.sorted(by: { $0.lastUsed > $1.lastUsed }) {
+            total += item.size
+            if total > limit {
+                item.entries.forEach { try? fm.removeItem(at: $0) }
+            }
+        }
+    }
+
+    /// Removes every download and preview.
+    public func clear() {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    /// Bumps the modification date so `trim` sees the entry as recently used.
+    static func markUsed(_ url: URL) {
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+    }
+
+    private static func contents(of dir: URL) -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+    }
+
+    static func allocatedSize(of url: URL) -> Int {
+        let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .isDirectoryKey]
+        guard let values = try? url.resourceValues(forKeys: keys) else { return 0 }
+        guard values.isDirectory == true else { return values.totalFileAllocatedSize ?? 0 }
+        let files = FileManager.default.enumerator(at: url, includingPropertiesForKeys: Array(keys))
+        return (files?.compactMap { ($0 as? URL).flatMap { try? $0.resourceValues(forKeys: keys).totalFileAllocatedSize } }
+            .reduce(0, +)) ?? 0
     }
 
     /// Moves `source` into place unless a concurrent load for the same family got there first.
