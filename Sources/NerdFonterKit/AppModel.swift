@@ -58,6 +58,10 @@ public final class AppModel {
     private var previewToken = UUID()
     /// Same, for scans of the Fonts folders.
     private var scanToken = UUID()
+    /// Work currently reading or writing the download cache.
+    private var cacheUsers = 0
+    /// The cache is trimmed once per launch, before anything else touches it.
+    private var didTrimCache = false
 
     public init(
         store: CatalogStore = .live, fontStore: FontStore = .live, library: FontLibrary = .live,
@@ -88,6 +92,26 @@ public final class AppModel {
         }
     }
 
+    // MARK: Cache
+
+    /// Not while any download, preview or install is using the cache, including previews for
+    /// fonts that are no longer selected but are still unpacking.
+    public var canClearCache: Bool { cacheUsers == 0 }
+
+    private func usingCache<T>(_ work: () async throws -> T) async rethrows -> T {
+        cacheUsers += 1
+        defer { cacheUsers -= 1 }
+        return try await work()
+    }
+
+    public func clearCache() async {
+        guard canClearCache else { return }
+        // Synchronous, so no new work can start using the cache halfway through.
+        fontStore.clear()
+        // The preview may have been reading cached files.
+        if selectedFont != nil { await loadPreview() }
+    }
+
     // MARK: Favorites
 
     public func toggleFavorite(_ id: FontFamily.ID) {
@@ -104,7 +128,13 @@ public final class AppModel {
     public func loadCatalog() async {
         catalogState = .loading
         do {
-            catalogState = .loaded(try await store.load())
+            let catalog = try await store.load()
+            // Trim before the list appears, so no preview or install can be using the cache.
+            if !didTrimCache {
+                didTrimCache = true
+                await fontStore.trim(keeping: catalog.release)
+            }
+            catalogState = .loaded(catalog)
             await refreshInstalled()
         } catch {
             catalogState = .failed
@@ -155,17 +185,20 @@ public final class AppModel {
         operations[font.id] = isUpdate ? .updating(nil) : .installing(nil)
         defer { operations[font.id] = nil }
         do {
-            let archive = try await fontStore.archive(for: font, release: catalog.release) { progress in
-                Task { @MainActor [weak self] in
-                    // Only while this install or update is still running, never over a later operation.
-                    switch self?.operations[font.id] {
-                    case .installing where !isUpdate: self?.operations[font.id] = .installing(progress)
-                    case .updating where isUpdate: self?.operations[font.id] = .updating(progress)
-                    default: break
+            // Unpacking happens inside the cache too, so the whole install counts as using it.
+            let added = try await usingCache {
+                let archive = try await fontStore.archive(for: font, release: catalog.release) { progress in
+                    Task { @MainActor [weak self] in
+                        // Only while this install or update is still running, never over a later operation.
+                        switch self?.operations[font.id] {
+                        case .installing where !isUpdate: self?.operations[font.id] = .installing(progress)
+                        case .updating where isUpdate: self?.operations[font.id] = .updating(progress)
+                        default: break
+                        }
                     }
                 }
+                return Set(try await library.install(archive: archive).map { $0.resolvingSymlinksInPath() })
             }
-            let added = Set(try await library.install(archive: archive).map { $0.resolvingSymlinksInPath() })
             if let old {
                 let leftovers = old.files.filter { !added.contains($0.resolvingSymlinksInPath()) }
                 try await library.uninstall(Installation(files: leftovers, isSystemWide: false))
@@ -210,10 +243,12 @@ public final class AppModel {
         }
         preview = .loading(nil)
         do {
-            let faces = try await fontStore.previewFaces(for: font, release: catalog.release) { progress in
-                Task { @MainActor [weak self] in
-                    guard let self, self.previewToken == token, case .loading = self.preview else { return }
-                    self.preview = .loading(progress)
+            let faces = try await usingCache {
+                try await fontStore.previewFaces(for: font, release: catalog.release) { progress in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.previewToken == token, case .loading = self.preview else { return }
+                        self.preview = .loading(progress)
+                    }
                 }
             }
             guard previewToken == token else { return }
