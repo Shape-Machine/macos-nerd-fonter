@@ -42,6 +42,11 @@ public struct FontFace: Identifiable, Hashable, @unchecked Sendable {
         return (String(stem[..<marker.lowerBound]), variant)
     }
 
+    /// The family name apps and editors use, e.g. "JetBrainsMono Nerd Font Mono".
+    public var familyName: String {
+        CTFontDescriptorCopyAttribute(descriptor, kCTFontFamilyNameAttribute) as? String ?? baseName
+    }
+
     public func font(size: CGFloat) -> CTFont {
         CTFontCreateWithFontDescriptor(descriptor, size, nil)
     }

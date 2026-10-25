@@ -14,6 +14,10 @@ struct FontDetailView: View {
                         Text(font.name).font(.largeTitle.weight(.semibold))
                         FavoriteButton(id: font.id, model: model)
                     }
+                    // Installed fonts preview from their own files, so this is the name editors need.
+                    if model.installed[font.id] != nil, case .loaded = model.preview, let face = model.previewFace {
+                        CopyNameButton(name: face.familyName)
+                    }
                     Text(font.description).foregroundStyle(.secondary)
                     Text(details).font(.callout).foregroundStyle(.tertiary)
                 }
@@ -68,6 +72,38 @@ struct FavoriteButton: View {
         }
         .buttonStyle(.plain)
         .help(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+    }
+}
+
+/// The exact family name of the shown variant, e.g. "JetBrainsMono Nerd Font Mono". Click to copy.
+private struct CopyNameButton: View {
+    let name: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(name, forType: .string)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                copied = false
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(name).font(.system(.callout, design: .monospaced))
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .foregroundStyle(copied ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(.quaternary.opacity(0.6), in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .help("Copy the font name for your editor or terminal settings")
+        .onChange(of: name) { copied = false }
     }
 }
 
