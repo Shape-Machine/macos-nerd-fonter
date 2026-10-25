@@ -107,7 +107,7 @@ public struct FontStore: Sendable {
     }
 
     /// Removes every download and preview.
-    public func clear() async {
+    public func clear() {
         try? FileManager.default.removeItem(at: root)
     }
 

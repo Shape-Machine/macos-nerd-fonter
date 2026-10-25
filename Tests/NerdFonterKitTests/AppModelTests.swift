@@ -178,4 +178,47 @@ struct AppModelTests {
         let reopened = Fixtures.model(defaults: defaults)
         #expect(reopened.favorites == ["Arimo"])
     }
+
+    // MARK: Cache
+
+    @Test func clearCacheWaitsForPreviewsOfFontsNoLongerSelected() async throws {
+        let gate = Gate()
+        let archive = try FontStoreTests.makeArchive(["ArimoNerdFont-Regular.ttf"])
+        let slow = FontStore(root: Fixtures.tempFile()) { _, _ in
+            await gate.wait()
+            let copy = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            try FileManager.default.copyItem(at: archive, to: copy)
+            return copy
+        }
+        let model = Fixtures.model(fontStore: slow)
+        await model.loadCatalog()
+        #expect(model.canClearCache)
+
+        model.selection = "Arimo"
+        let load = Task { await model.loadPreview() }
+        while model.canClearCache { await Task.yield() }
+        model.selection = "JetBrainsMono"  // moved on; Arimo's download is still running
+        #expect(!model.canClearCache)
+
+        await gate.open()
+        await load.value
+        #expect(model.canClearCache)
+    }
+}
+
+/// Holds work until opened.
+actor Gate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters = []
+    }
 }

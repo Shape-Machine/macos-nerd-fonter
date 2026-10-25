@@ -63,9 +63,10 @@ func render(size: Int) -> Data {
 }
 
 let root = URL(filePath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent()
-let iconset = FileManager.default.temporaryDirectory.appending(path: "AppIcon.iconset")
-try? FileManager.default.removeItem(at: iconset)
+// A fresh folder per run, so overlapping runs can't clobber each other.
+let iconset = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: iconset) }
 for points in [16, 32, 128, 256, 512] {
     try render(size: points).write(to: iconset.appending(path: "icon_\(points)x\(points).png"))
     try render(size: points * 2).write(to: iconset.appending(path: "icon_\(points)x\(points)@2x.png"))
@@ -77,4 +78,8 @@ iconutil.executableURL = URL(filePath: "/usr/bin/iconutil")
 iconutil.arguments = ["-c", "icns", iconset.path, "-o", resources.appending(path: "AppIcon.icns").path]
 try iconutil.run()
 iconutil.waitUntilExit()
+guard iconutil.terminationStatus == 0 else {
+    print("iconutil failed with status \(iconutil.terminationStatus)")
+    exit(1)
+}
 print("Wrote Resources/AppIcon.icns")
