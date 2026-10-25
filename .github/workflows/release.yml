@@ -1,0 +1,58 @@
+# Tests and builds the app on every pull request; on a version tag (v1.2.3) also publishes a
+# GitHub release with a downloadable, unsigned NerdFonter.zip (universal: Apple silicon + Intel).
+name: Build
+
+on:
+  pull_request:
+  push:
+    # Plain numeric versions only: Apple requires numeric bundle versions.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+# Read-only by default; only the release job, which runs no repository code, can write.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: swift test
+
+      - name: Build app
+        run: |
+          VERSION=0.0.0
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Tag $GITHUB_REF_NAME isn't a numeric version like v1.2.3"
+              exit 1
+            fi
+          fi
+          VERSION="$VERSION" UNIVERSAL=1 ./scripts/build-app.sh
+          ditto -c -k --keepParent build/NerdFonter.app NerdFonter.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NerdFonter
+          path: NerdFonter.zip
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NerdFonter
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" NerdFonter.zip
+          --repo "$GITHUB_REPOSITORY" --title "Nerd Fonter $GITHUB_REF_NAME" --generate-notes

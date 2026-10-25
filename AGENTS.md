@@ -25,7 +25,7 @@
 - **Target:** macOS 26 Tahoe minimum. Embrace the current design language.
 - **Shape:** Single-window Dock app — font list + preview pane.
 - **Build:** Swift Package (no `.xcodeproj`). `swift build` plus a small script that wraps the binary into a `.app`.
-- **Distribution:** Personal use only for now — no signing, notarization, or release pipeline.
+- **Distribution:** GitHub Releases for enthusiasts — unsigned (ad-hoc), not notarized, universal binary. Pushing a `v*` tag runs `.github/workflows/release.yml`, which tests, builds, and publishes `NerdFonter.zip`. Pull requests run the same build.
 
 ## Commands
 
