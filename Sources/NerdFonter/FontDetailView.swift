@@ -72,7 +72,7 @@ private struct PreviewView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                Picker("Variant", selection: $model.variant) {
+                Picker("Variant", selection: $model.shownVariant) {
                     ForEach(model.variants) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)

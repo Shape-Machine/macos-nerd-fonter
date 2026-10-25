@@ -112,6 +112,12 @@ public final class AppModel {
         return FontFace.Variant.allCases.filter(available.contains)
     }
 
+    /// The variant actually on screen, for the picker. Setting it also updates the remembered variant.
+    public var shownVariant: FontFace.Variant {
+        get { previewFace?.variant ?? variant }
+        set { variant = newValue }
+    }
+
     /// The face to render: the chosen typeface and variant, falling back to any variant of that typeface.
     public var previewFace: FontFace? {
         let candidates = faces.filter { $0.baseName == baseName }

@@ -58,6 +58,7 @@ struct AppModelTests {
         // NL has no Mono: fall back to what exists without changing the remembered variant.
         model.baseName = "JetBrainsMonoNL"
         #expect(model.previewFace?.url.lastPathComponent == "JetBrainsMonoNLNerdFont-Regular.ttf")
+        #expect(model.shownVariant == .standard)
         #expect(model.variant == .mono)
     }
 

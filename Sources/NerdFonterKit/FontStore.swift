@@ -2,8 +2,8 @@ import Foundation
 
 /// Downloads release archives and extracts preview faces under the app's cache directory.
 ///
-/// Archives are `.tar.xz` (a few MB each). For previews we extract only the Regular face of
-/// each variant, since a fully extracted family can run to hundreds of MB.
+/// Archives are `.tar.xz` (a few MB each). For previews we extract one face per typeface and
+/// variant (its Regular, when it has one), since a fully extracted family can run to hundreds of MB.
 public struct FontStore: Sendable {
     public typealias Download = @Sendable (URL, _ progress: @escaping @Sendable (Double) -> Void) async throws -> URL
 
@@ -35,16 +35,17 @@ public struct FontStore: Sendable {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: staging) }
 
-        // Fails when nothing matches; handled by the fallback below.
-        _ = try? await Self.tar(["-xJf", archive.path, "-C", staging.path, "*-Regular.[ot]tf"])
-        if Self.faces(in: staging).isEmpty {
+        do {
             let names = try await Self.tar(["-tJf", archive.path]).split(separator: "\n").map(String.init)
             let picks = Self.previewNames(from: names)
             guard !picks.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
             try await Self.tar(["-xJf", archive.path, "-C", staging.path] + picks)
+        } catch {
+            // Don't let a broken download stick around and defeat retries.
+            try? fm.removeItem(at: archive)
+            throw error
         }
-        // Another load may have finished first; keep whichever landed.
-        if !fm.fileExists(atPath: dir.path) { try fm.moveItem(at: staging, to: dir) }
+        try Self.moveIfAbsent(staging, to: dir)
         return Self.faces(in: dir)
     }
 
@@ -55,13 +56,17 @@ public struct FontStore: Sendable {
         if fm.fileExists(atPath: file.path) { return file }
 
         let temp = try await download(Self.archiveURL(release: release, folderName: font.folderName), progress)
+        defer { try? fm.removeItem(at: temp) }
         try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if fm.fileExists(atPath: file.path) {
-            try? fm.removeItem(at: temp)
-        } else {
-            try fm.moveItem(at: temp, to: file)
-        }
+        try Self.moveIfAbsent(temp, to: file)
         return file
+    }
+
+    /// Moves `source` into place unless a concurrent load for the same family got there first.
+    static func moveIfAbsent(_ source: URL, to destination: URL) throws {
+        do {
+            try FileManager.default.moveItem(at: source, to: destination)
+        } catch where FileManager.default.fileExists(atPath: destination.path) {}
     }
 
     /// One file per typeface/variant: its Regular face, or the first face when there is no Regular.

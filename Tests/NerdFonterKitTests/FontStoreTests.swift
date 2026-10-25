@@ -66,6 +66,37 @@ struct FontStoreTests {
         #expect(faces.map(\.url.lastPathComponent) == ["TestNerdFont-Book.ttf"])
     }
 
+    @Test func keepsVariantsWithoutRegularAlongsideOnesWithIt() async throws {
+        let archive = try Self.makeArchive(["TestNerdFont-Regular.ttf", "TestNerdFontMono-Book.ttf"])
+        let store = Self.store(serving: archive, counter: Counter())
+        let faces = try await store.previewFaces(for: font, release: "v1", progress: { _ in })
+        #expect(faces.map(\.url.lastPathComponent) == ["TestNerdFont-Regular.ttf", "TestNerdFontMono-Book.ttf"])
+    }
+
+    @Test func discardsBrokenArchiveSoRetriesDownloadAgain() async throws {
+        let broken = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).tar.xz")
+        try Data("not an archive".utf8).write(to: broken)
+        let downloads = Counter()
+        let store = Self.store(serving: broken, counter: downloads)
+
+        for _ in 0..<2 {
+            await #expect(throws: (any Error).self) {
+                try await store.previewFaces(for: font, release: "v1", progress: { _ in })
+            }
+        }
+        #expect(downloads.value == 2)
+    }
+
+    @Test func overlappingLoadsBothSucceed() async throws {
+        let archive = try Self.makeArchive(["TestNerdFont-Regular.ttf"])
+        let store = Self.store(serving: archive, counter: Counter())
+        async let first = store.previewFaces(for: font, release: "v1", progress: { _ in })
+        async let second = store.previewFaces(for: font, release: "v1", progress: { _ in })
+        let (a, b) = try await (first, second)
+        #expect(a.count == 1)
+        #expect(b.count == 1)
+    }
+
     // MARK: Helpers
 
     final class Counter: @unchecked Sendable {
