@@ -11,6 +11,7 @@
 - **Always work in a feature branch.** Never commit directly to `main`.
 - Branch names: `feat/…`, `fix/…`, `chore/…`, `docs/…` — short and descriptive.
 - Merge only through GitHub pull requests into `main`. One focused change per PR.
+- After a PR is merged: confirm it's merged, switch to `main`, `git pull --ff-only`, `git fetch --prune`, and delete the merged local branch before starting the next one.
 
 ## Principles
 
